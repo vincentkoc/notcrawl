@@ -1,6 +1,6 @@
-db_path = "~/.notioncrawl/notioncrawl.db"
-cache_dir = "~/.notioncrawl/cache"
-markdown_dir = "~/.notioncrawl/pages"
+db_path = "~/.notcrawl/notcrawl.db"
+cache_dir = "~/.notcrawl/cache"
+markdown_dir = "~/.notcrawl/pages"
 
 [notion.desktop]
 enabled = true
@@ -15,5 +15,5 @@ version = "2022-06-28"
 [share]
 remote = ""
 branch = "main"
-repo_path = "~/.notioncrawl/share"
+repo_path = "~/.notcrawl/share"
 stale_after = "1h"

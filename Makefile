@@ -1,15 +1,15 @@
-BINARY ?= bin/notioncrawl
+BINARY ?= bin/notcrawl
 
 .PHONY: build test run fmt release-notes release-snapshot release-check
 
 build:
-	go build -o $(BINARY) ./cmd/notioncrawl
+	go build -o $(BINARY) ./cmd/notcrawl
 
 test:
 	go test ./...
 
 run:
-	go run ./cmd/notioncrawl $(ARGS)
+	go run ./cmd/notcrawl $(ARGS)
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './.git/*')

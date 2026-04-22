@@ -1,4 +1,4 @@
-# Contributing to notioncrawl
+# Contributing to notcrawl
 
 Keep real Notion workspace data, secrets, tokens, cookies, and exported private
 content out of git.
@@ -7,7 +7,7 @@ Useful local checks:
 
 ```bash
 go test ./...
-go build ./cmd/notioncrawl
+go build ./cmd/notcrawl
 ```
 
 Implementation notes:

@@ -1,4 +1,4 @@
-# notioncrawl Spec
+# notcrawl Spec
 
 ## Goals
 
@@ -13,7 +13,7 @@
 
 ## Product Summary
 
-`notioncrawl` is a Go CLI that turns Notion workspace memory into a local
+`notcrawl` is a Go CLI that turns Notion workspace memory into a local
 SQLite archive plus normalized Markdown files.
 
 V1 scope:

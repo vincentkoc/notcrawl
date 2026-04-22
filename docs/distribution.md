@@ -1,13 +1,13 @@
 # Distribution
 
-`notioncrawl` ships through GitHub Releases, Homebrew tap updates, and optional
+`notcrawl` ships through GitHub Releases, Homebrew tap updates, and optional
 Cloudsmith APT/RPM repositories.
 
 ## Local Checks
 
 ```bash
 go test ./...
-go build ./cmd/notioncrawl
+go build ./cmd/notcrawl
 make release-notes TAG=v0.1.0
 ```
 

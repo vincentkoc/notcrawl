@@ -1,8 +1,8 @@
 bin/
 dist/
-/notioncrawl
+/notcrawl
 *.db
 *.db-*
 *.log
 .DS_Store
-.notioncrawl/
+.notcrawl/

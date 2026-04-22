@@ -1,6 +1,6 @@
-# notioncrawl
+# notcrawl
 
-`notioncrawl` mirrors Notion workspace data into local SQLite and normalized
+`notcrawl` mirrors Notion workspace data into local SQLite and normalized
 Markdown so you can search, query, diff, and share your Notion memory without
 depending on the Notion UI.
 
@@ -25,28 +25,28 @@ to without holding Notion credentials.
 ## Quick Start
 
 ```bash
-go build -o bin/notioncrawl ./cmd/notioncrawl
-bin/notioncrawl init
-bin/notioncrawl doctor
-bin/notioncrawl sync --source desktop
-bin/notioncrawl export-md
-bin/notioncrawl search "launch plan"
+go build -o bin/notcrawl ./cmd/notcrawl
+bin/notcrawl init
+bin/notcrawl doctor
+bin/notcrawl sync --source desktop
+bin/notcrawl export-md
+bin/notcrawl search "launch plan"
 ```
 
 For API sync:
 
 ```bash
 export NOTION_TOKEN="secret_..."
-bin/notioncrawl sync --source api
+bin/notcrawl sync --source api
 ```
 
 Default paths:
 
-- config: `~/.notioncrawl/config.toml`
-- database: `~/.notioncrawl/notioncrawl.db`
-- cache: `~/.notioncrawl/cache`
-- Markdown archive: `~/.notioncrawl/pages`
-- git share repo: `~/.notioncrawl/share`
+- config: `~/.notcrawl/config.toml`
+- database: `~/.notcrawl/notcrawl.db`
+- cache: `~/.notcrawl/cache`
+- Markdown archive: `~/.notcrawl/pages`
+- git share repo: `~/.notcrawl/share`
 
 ## Commands
 

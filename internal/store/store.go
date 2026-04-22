@@ -160,7 +160,7 @@ func (s *Store) init(ctx context.Context) error {
 		return err
 	}
 	if current > schemaVersion {
-		return fmt.Errorf("database schema version %d is newer than this notioncrawl build supports (%d)", current, schemaVersion)
+		return fmt.Errorf("database schema version %d is newer than this notcrawl build supports (%d)", current, schemaVersion)
 	}
 	if _, err := s.db.ExecContext(ctx, `insert or replace into meta(key, value) values('schema_version', ?)`, schemaVersion); err != nil {
 		return err

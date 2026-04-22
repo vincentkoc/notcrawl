@@ -1,11 +1,11 @@
 version: 2
 
-project_name: notioncrawl
+project_name: notcrawl
 
 builds:
-  - id: notioncrawl
-    main: ./cmd/notioncrawl
-    binary: notioncrawl
+  - id: notcrawl
+    main: ./cmd/notcrawl
+    binary: notcrawl
     env:
       - CGO_ENABLED=0
     goos:
@@ -22,7 +22,7 @@ builds:
 archives:
   - id: bundles
     ids:
-      - notioncrawl
+      - notcrawl
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
@@ -47,10 +47,10 @@ changelog:
 nfpms:
   - id: linux-packages
     ids:
-      - notioncrawl
-    package_name: notioncrawl
+      - notcrawl
+    package_name: notcrawl
     file_name_template: "{{ .ConventionalFileName }}"
-    homepage: https://github.com/vincentkoc/notioncrawl
+    homepage: https://github.com/vincentkoc/notcrawl
     maintainer: Vincent Koc <vincent@vincentkoc.com>
     description: Local-first Notion crawler into SQLite and normalized Markdown.
     license: MIT
@@ -62,8 +62,8 @@ nfpms:
     priority: optional
     contents:
       - src: ./README.md
-        dst: /usr/share/doc/notioncrawl/README.md
+        dst: /usr/share/doc/notcrawl/README.md
       - src: ./LICENSE
-        dst: /usr/share/doc/notioncrawl/LICENSE
+        dst: /usr/share/doc/notcrawl/LICENSE
       - src: ./config.example.toml
-        dst: /usr/share/doc/notioncrawl/config.example.toml
+        dst: /usr/share/doc/notcrawl/config.example.toml

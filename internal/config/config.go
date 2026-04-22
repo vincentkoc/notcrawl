@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	defaultDirName     = ".notioncrawl"
+	defaultDirName     = ".notcrawl"
 	defaultDesktopPath = "~/Library/Application Support/Notion/notion.db"
 )
 
@@ -51,7 +51,7 @@ type ShareConfig struct {
 func Default() Config {
 	base := filepath.ToSlash(filepath.Join("~", defaultDirName))
 	return Config{
-		DBPath:      filepath.ToSlash(filepath.Join(base, "notioncrawl.db")),
+		DBPath:      filepath.ToSlash(filepath.Join(base, "notcrawl.db")),
 		CacheDir:    filepath.ToSlash(filepath.Join(base, "cache")),
 		MarkdownDir: filepath.ToSlash(filepath.Join(base, "pages")),
 		Notion: NotionConfig{

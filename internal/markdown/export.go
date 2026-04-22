@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/notioncrawl/internal/notiontext"
-	"github.com/vincentkoc/notioncrawl/internal/store"
+	"github.com/vincentkoc/notcrawl/internal/notiontext"
+	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
 type Exporter struct {

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vincentkoc/notioncrawl/internal/markdown"
-	"github.com/vincentkoc/notioncrawl/internal/store"
+	"github.com/vincentkoc/notcrawl/internal/markdown"
+	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
 func TestPublishAndImportSnapshot(t *testing.T) {

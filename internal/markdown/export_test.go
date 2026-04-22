@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vincentkoc/notioncrawl/internal/store"
+	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
 func TestExporterWritesMarkdown(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "notioncrawl.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

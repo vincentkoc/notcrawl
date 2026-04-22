@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/notioncrawl/internal/store"
+	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
 var exportTables = []string{
@@ -64,7 +64,7 @@ func Publish(ctx context.Context, st *store.Store, opts PublishOptions) (Publish
 		opts.Branch = "main"
 	}
 	if opts.Message == "" {
-		opts.Message = "archive: notioncrawl snapshot"
+		opts.Message = "archive: notcrawl snapshot"
 	}
 	if err := ensureRepo(ctx, opts.RepoPath, opts.Remote, opts.Branch); err != nil {
 		return PublishSummary{}, err

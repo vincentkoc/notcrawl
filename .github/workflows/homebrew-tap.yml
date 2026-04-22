@@ -48,12 +48,12 @@ jobs:
           VERSION="${TAG#v}"
           SOURCE_URL="https://github.com/${SOURCE_REPO}/archive/refs/tags/${TAG}.tar.gz"
 
-          curl -fsSL "${SOURCE_URL}" -o /tmp/notioncrawl-src.tar.gz
-          SHA256="$(shasum -a 256 /tmp/notioncrawl-src.tar.gz | awk '{print $1}')"
+          curl -fsSL "${SOURCE_URL}" -o /tmp/notcrawl-src.tar.gz
+          SHA256="$(shasum -a 256 /tmp/notcrawl-src.tar.gz | awk '{print $1}')"
 
           mkdir -p Formula
-          cat > Formula/notioncrawl.rb <<EOF
-          class Notioncrawl < Formula
+          cat > Formula/notcrawl.rb <<EOF
+          class Notcrawl < Formula
             desc "Local-first Notion crawler into SQLite and normalized Markdown"
             homepage "https://github.com/${SOURCE_REPO}"
             url "${SOURCE_URL}"
@@ -64,13 +64,13 @@ jobs:
             depends_on "go" => :build
 
             def install
-              system "go", "build", *std_go_args(ldflags: "-s -w"), "./cmd/notioncrawl"
+              system "go", "build", *std_go_args(ldflags: "-s -w"), "./cmd/notcrawl"
               pkgshare.install "config.example.toml"
               doc.install "README.md", "LICENSE", "SPEC.md"
             end
 
             test do
-              assert_match "Usage of notioncrawl:", shell_output("#{bin}/notioncrawl --help")
+              assert_match "Usage of notcrawl:", shell_output("#{bin}/notcrawl --help")
             end
           end
           EOF
@@ -80,13 +80,13 @@ jobs:
           TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
         run: |
           set -euo pipefail
-          git add Formula/notioncrawl.rb
+          git add Formula/notcrawl.rb
           if git diff --cached --quiet; then
             echo "No tap changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update notioncrawl formula for ${TAG}"
+          git commit -m "chore: update notcrawl formula for ${TAG}"
           git pull --rebase origin main
           git push

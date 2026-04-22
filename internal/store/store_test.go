@@ -7,7 +7,7 @@ import (
 )
 
 func TestStoreUpsertsAndSearchesPage(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "notioncrawl.db"))
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

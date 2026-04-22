@@ -33,7 +33,7 @@ section() {
 }
 
 cat <<EOF
-## notioncrawl v${version}
+## notcrawl v${version}
 
 local-first Notion crawling into SQLite, normalized Markdown, and git-backed snapshots.
 EOF

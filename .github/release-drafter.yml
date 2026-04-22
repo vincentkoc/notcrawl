@@ -1,4 +1,4 @@
-name-template: "notioncrawl v$RESOLVED_VERSION"
+name-template: "notcrawl v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: '\<*_&'
@@ -101,7 +101,7 @@ autolabeler:
       - '/.*/'
 
 template: |
-  ## notioncrawl v$RESOLVED_VERSION
+  ## notcrawl v$RESOLVED_VERSION
 
   local-first Notion crawling into SQLite, normalized Markdown, and git-backed snapshots.
 

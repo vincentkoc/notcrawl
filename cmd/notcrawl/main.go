@@ -10,17 +10,17 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vincentkoc/notioncrawl/internal/config"
-	"github.com/vincentkoc/notioncrawl/internal/markdown"
-	"github.com/vincentkoc/notioncrawl/internal/notionapi"
-	"github.com/vincentkoc/notioncrawl/internal/notiondesktop"
-	"github.com/vincentkoc/notioncrawl/internal/share"
-	"github.com/vincentkoc/notioncrawl/internal/store"
+	"github.com/vincentkoc/notcrawl/internal/config"
+	"github.com/vincentkoc/notcrawl/internal/markdown"
+	"github.com/vincentkoc/notcrawl/internal/notionapi"
+	"github.com/vincentkoc/notcrawl/internal/notiondesktop"
+	"github.com/vincentkoc/notcrawl/internal/share"
+	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "notioncrawl:", err)
+		fmt.Fprintln(os.Stderr, "notcrawl:", err)
 		os.Exit(1)
 	}
 }
@@ -30,7 +30,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		printHelp(stdout)
 		return nil
 	}
-	global := flag.NewFlagSet("notioncrawl", flag.ContinueOnError)
+	global := flag.NewFlagSet("notcrawl", flag.ContinueOnError)
 	global.SetOutput(stderr)
 	configPath := global.String("config", "", "config file path")
 	dbPath := global.String("db", "", "database path override")
@@ -225,7 +225,7 @@ func runPublish(ctx context.Context, stdout io.Writer, cfg config.Config, args [
 	remote := fs.String("remote", cfg.Share.Remote, "git remote")
 	repo := fs.String("repo", cfg.Share.RepoPath, "share repo path")
 	branch := fs.String("branch", cfg.Share.Branch, "share branch")
-	message := fs.String("message", "archive: notioncrawl snapshot", "commit message")
+	message := fs.String("message", "archive: notcrawl snapshot", "commit message")
 	push := fs.Bool("push", false, "push after commit")
 	noCommit := fs.Bool("no-commit", false, "write snapshot without committing")
 	if err := fs.Parse(args); err != nil {
@@ -333,8 +333,8 @@ func isReadOnlyQuery(query string) bool {
 }
 
 func printHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage of notioncrawl:
-  notioncrawl [global flags] <command> [args]
+	fmt.Fprint(w, `Usage of notcrawl:
+  notcrawl [global flags] <command> [args]
 
 Global flags:
   --config PATH   config file path

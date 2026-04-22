@@ -1,4 +1,4 @@
-module github.com/vincentkoc/notioncrawl
+module github.com/vincentkoc/notcrawl
 
 go 1.26.0
 
