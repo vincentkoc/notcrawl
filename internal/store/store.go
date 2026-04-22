@@ -359,3 +359,35 @@ func (s *Store) Search(ctx context.Context, q string, limit int) ([]SearchResult
 	}
 	return out, rows.Err()
 }
+
+func (s *Store) RebuildFTS(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `delete from page_fts`); err != nil {
+		return err
+	}
+	rows, err := s.db.QueryContext(ctx, `select id from pages`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.refreshPageFTS(ctx, id); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `delete from comment_fts`); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `insert into comment_fts(comment_id, page_id, body) select id, page_id, text from comments where alive = 1`)
+	return err
+}
