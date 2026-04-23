@@ -25,7 +25,7 @@ to without holding Notion credentials.
 - normalized Markdown export organized by space and page path
 - CSV/TSV export for crawled Notion database rows
 - compressed JSONL git-share snapshots plus import/update workflows
-- archive status and SQLite maintenance commands
+- archive status, activity reporting, and SQLite maintenance commands
 - read-only SQL access for ad hoc inspection
 
 ## Install
@@ -46,6 +46,7 @@ Use the local Notion Desktop cache:
 notcrawl init
 notcrawl doctor
 notcrawl status
+notcrawl report
 notcrawl sync --source desktop
 notcrawl export-md
 notcrawl search "launch plan"
@@ -73,6 +74,7 @@ Default paths:
 - `init` writes a starter config
 - `doctor` checks config, SQLite, desktop cache, and token presence
 - `status` prints archive counts, last sync time, and database/WAL size
+- `report` summarizes recent page, database, space, and comment activity
 - `maintain` rebuilds FTS, optimizes SQLite indexes, and can run `VACUUM`
 - `sync` ingests from `desktop`, `api`, or `all`
 - `export-md` renders normalized Markdown files from SQLite

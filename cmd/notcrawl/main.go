@@ -14,6 +14,7 @@ import (
 	"github.com/vincentkoc/notcrawl/internal/markdown"
 	"github.com/vincentkoc/notcrawl/internal/notionapi"
 	"github.com/vincentkoc/notcrawl/internal/notiondesktop"
+	"github.com/vincentkoc/notcrawl/internal/report"
 	"github.com/vincentkoc/notcrawl/internal/share"
 	"github.com/vincentkoc/notcrawl/internal/store"
 	"github.com/vincentkoc/notcrawl/internal/tableexport"
@@ -68,6 +69,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runDoctor(ctx, stdout, cfg)
 	case "status":
 		return runStatus(ctx, stdout, cfg)
+	case "report":
+		return runReport(ctx, stdout, cfg)
 	case "maintain":
 		return runMaintain(ctx, stdout, cfg, cmdArgs)
 	case "sync":
@@ -138,6 +141,24 @@ func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 		return err
 	}
 	b, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, string(b))
+	return nil
+}
+
+func runReport(ctx context.Context, stdout io.Writer, cfg config.Config) error {
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	activity, err := report.Build(ctx, st, report.Options{})
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(activity, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -456,6 +477,7 @@ Commands:
   init                      Write a starter config
   doctor                    Check config, database, desktop cache, and token
   status                    Show archive counts and database size
+  report                    Show recent archive activity
   maintain [--vacuum]       Rebuild FTS and optimize SQLite indexes
   sync --source desktop     Ingest Notion Desktop cache
   sync --source api         Ingest through the official Notion API
