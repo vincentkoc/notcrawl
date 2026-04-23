@@ -20,7 +20,9 @@ to without holding Notion credentials.
 - local SQLite storage with FTS5
 - read-only local desktop cache ingestion from macOS Notion
 - official API page/block/user/comment ingestion
+- Notion database metadata and row ingestion through the official API
 - normalized Markdown export organized by space and page path
+- CSV/TSV export for crawled Notion database rows
 - compressed JSONL git-share snapshots plus import/update workflows
 - read-only SQL access for ad hoc inspection
 
@@ -51,6 +53,8 @@ Or use the official Notion API:
 ```bash
 export NOTION_TOKEN="secret_..."
 notcrawl sync --source api
+notcrawl databases
+notcrawl export-db --database DATABASE_ID --format csv --output roadmap.csv
 ```
 
 Default paths:
@@ -67,6 +71,8 @@ Default paths:
 - `doctor` checks config, SQLite, desktop cache, and token presence
 - `sync` ingests from `desktop`, `api`, or `all`
 - `export-md` renders normalized Markdown files from SQLite
+- `databases` lists crawled Notion databases
+- `export-db` exports a crawled Notion database to CSV or TSV
 - `search` searches page and comment text through FTS5
 - `sql` runs read-only SQL against the archive
 - `publish` exports SQLite tables and Markdown into a git share repo

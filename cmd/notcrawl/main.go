@@ -16,6 +16,7 @@ import (
 	"github.com/vincentkoc/notcrawl/internal/notiondesktop"
 	"github.com/vincentkoc/notcrawl/internal/share"
 	"github.com/vincentkoc/notcrawl/internal/store"
+	"github.com/vincentkoc/notcrawl/internal/tableexport"
 )
 
 func main() {
@@ -69,6 +70,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runSync(ctx, stdout, cfg, cmdArgs)
 	case "export-md":
 		return runExportMarkdown(ctx, stdout, cfg)
+	case "databases":
+		return runDatabases(ctx, stdout, cfg)
+	case "export-db":
+		return runExportDatabase(ctx, stdout, cfg, cmdArgs)
 	case "search":
 		return runSearch(ctx, stdout, cfg, cmdArgs)
 	case "sql":
@@ -140,7 +145,7 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "api: users=%d pages=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Blocks, s.Comments)
+		fmt.Fprintf(stdout, "api: users=%d pages=%d databases=%d database_rows=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Databases, s.DatabaseRows, s.Blocks, s.Comments)
 	case "all":
 		if cfg.Notion.Desktop.Enabled {
 			s, err := notiondesktop.Ingest(ctx, st, cfg.Notion.Desktop.Path, cfg.CacheDir)
@@ -158,7 +163,7 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "api: users=%d pages=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Blocks, s.Comments)
+			fmt.Fprintf(stdout, "api: users=%d pages=%d databases=%d database_rows=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Databases, s.DatabaseRows, s.Blocks, s.Comments)
 		}
 	default:
 		return fmt.Errorf("unknown source %q", *source)
@@ -177,6 +182,63 @@ func runExportMarkdown(ctx context.Context, stdout io.Writer, cfg config.Config)
 		return err
 	}
 	fmt.Fprintf(stdout, "exported %d pages to %s\n", s.Pages, cfg.MarkdownDir)
+	return nil
+}
+
+func runDatabases(ctx context.Context, stdout io.Writer, cfg config.Config) error {
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	collections, err := st.Collections(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, "id\tname\tsource")
+	for _, collection := range collections {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", collection.ID, collection.Name, collection.Source)
+	}
+	return nil
+}
+
+func runExportDatabase(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("export-db", flag.ContinueOnError)
+	databaseID := fs.String("database", "", "database id to export")
+	format := fs.String("format", "csv", "output format: csv or tsv")
+	output := fs.String("output", "", "output file path, defaults to stdout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *databaseID == "" {
+		return fmt.Errorf("export-db requires --database")
+	}
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	var out io.Writer = stdout
+	var file *os.File
+	if *output != "" {
+		outputPath, err := config.ExpandPath(*output)
+		if err != nil {
+			return err
+		}
+		file, err = os.Create(outputPath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		out = file
+	}
+	s, err := tableexport.Exporter{Store: st}.Export(ctx, *databaseID, tableexport.Format(*format), out)
+	if err != nil {
+		return err
+	}
+	if *output != "" {
+		fmt.Fprintf(stdout, "exported %d rows and %d columns from %s to %s\n", s.Rows, s.Columns, s.Database, file.Name())
+	}
 	return nil
 }
 
@@ -347,6 +409,8 @@ Commands:
   sync --source api         Ingest through the official Notion API
   sync --source all         Run enabled sources
   export-md                 Render normalized Markdown from SQLite
+  databases                 List crawled Notion databases
+  export-db --database ID   Export a database as CSV or TSV
   search QUERY              Search page text
   sql QUERY                 Run read-only SQL
   publish [--push]          Export data and Markdown into a git share repo

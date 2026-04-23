@@ -25,10 +25,12 @@ type Client struct {
 }
 
 type Summary struct {
-	Users    int
-	Pages    int
-	Blocks   int
-	Comments int
+	Users        int
+	Pages        int
+	Blocks       int
+	Comments     int
+	Databases    int
+	DatabaseRows int
 }
 
 func (c Client) Sync(ctx context.Context, st *store.Store) (Summary, error) {
@@ -63,13 +65,25 @@ func (c Client) Sync(ctx context.Context, st *store.Store) (Summary, error) {
 		return s, err
 	}
 	for _, page := range pages {
-		count, comments, err := c.ingestPage(ctx, st, page)
+		count, comments, err := c.ingestPage(ctx, st, page, ingestPageOptions{FetchBlocks: true, FetchComments: true})
 		if err != nil {
 			return s, err
 		}
 		s.Pages++
 		s.Blocks += count
 		s.Comments += comments
+	}
+	databases, err := c.searchDatabases(ctx)
+	if err != nil {
+		return s, err
+	}
+	for _, database := range databases {
+		rows, err := c.ingestDatabase(ctx, st, database)
+		if err != nil {
+			return s, err
+		}
+		s.Databases++
+		s.DatabaseRows += rows
 	}
 	if err := st.SetSyncState(ctx, SourceName, "workspace", "default", time.Now().Format(time.RFC3339)); err != nil {
 		return s, err
@@ -128,10 +142,18 @@ func (c Client) listUsers(ctx context.Context) ([]obj, error) {
 }
 
 func (c Client) searchPages(ctx context.Context) ([]obj, error) {
+	return c.searchObjects(ctx, "page")
+}
+
+func (c Client) searchDatabases(ctx context.Context) ([]obj, error) {
+	return c.searchObjects(ctx, "database")
+}
+
+func (c Client) searchObjects(ctx context.Context, objectType string) ([]obj, error) {
 	var out []obj
 	cursor := ""
 	for {
-		body := obj{"page_size": 100, "filter": obj{"property": "object", "value": "page"}}
+		body := obj{"page_size": 100, "filter": obj{"property": "object", "value": objectType}}
 		if cursor != "" {
 			body["start_cursor"] = cursor
 		}
@@ -154,7 +176,13 @@ func (c Client) searchPages(ctx context.Context) ([]obj, error) {
 	}
 }
 
-func (c Client) ingestPage(ctx context.Context, st *store.Store, page obj) (blockCount int, commentCount int, err error) {
+type ingestPageOptions struct {
+	CollectionID  string
+	FetchBlocks   bool
+	FetchComments bool
+}
+
+func (c Client) ingestPage(ctx context.Context, st *store.Store, page obj, opts ingestPageOptions) (blockCount int, commentCount int, err error) {
 	raw := notiontext.MarshalRaw(page)
 	props := marshalAny(page["properties"])
 	parent := page.mapObj("parent")
@@ -162,12 +190,20 @@ func (c Client) ingestPage(ctx context.Context, st *store.Store, page obj) (bloc
 	if parentID == "" {
 		parentID = parent.string("database_id")
 	}
+	if parentID == "" {
+		parentID = parent.string("data_source_id")
+	}
+	collectionID := opts.CollectionID
+	if collectionID == "" && (parent.string("type") == "database_id" || parent.string("type") == "data_source_id") {
+		collectionID = parentID
+	}
 	spaceID := parent.string("workspace")
 	p := store.Page{
 		ID:             page.string("id"),
 		SpaceID:        spaceID,
 		ParentID:       parentID,
 		ParentTable:    parent.string("type"),
+		CollectionID:   collectionID,
 		Title:          titleFromAPIPage(page),
 		URL:            page.string("url"),
 		PropertiesJSON: props,
@@ -184,15 +220,83 @@ func (c Client) ingestPage(ctx context.Context, st *store.Store, page obj) (bloc
 	if err := st.UpsertPage(ctx, p); err != nil {
 		return 0, 0, err
 	}
-	blocks, err := c.walkBlocks(ctx, st, p.ID, p.ID, p.SpaceID)
-	if err != nil {
-		return 0, 0, err
+	var blocks, comments int
+	if opts.FetchBlocks {
+		blocks, err = c.walkBlocks(ctx, st, p.ID, p.ID, p.SpaceID)
+		if err != nil {
+			return 0, 0, err
+		}
 	}
-	comments, err := c.ingestComments(ctx, st, p.ID, p.SpaceID)
-	if err != nil {
-		return 0, 0, err
+	if opts.FetchComments {
+		comments, err = c.ingestComments(ctx, st, p.ID, p.SpaceID)
+		if err != nil {
+			return 0, 0, err
+		}
 	}
 	return blocks, comments, nil
+}
+
+func (c Client) ingestDatabase(ctx context.Context, st *store.Store, database obj) (int, error) {
+	id := database.string("id")
+	raw := notiontext.MarshalRaw(database)
+	parent := database.mapObj("parent")
+	name := notiontext.Plain(database["title"])
+	if name == "" {
+		name = id
+	}
+	if err := st.UpsertCollection(ctx, store.Collection{
+		ID:         id,
+		SpaceID:    parent.string("workspace"),
+		ParentID:   firstNonEmpty(parent.string("page_id"), parent.string("block_id"), parent.string("workspace")),
+		Name:       name,
+		SchemaJSON: marshalAny(database["properties"]),
+		FormatJSON: marshalAny(database),
+		RawJSON:    raw,
+		Source:     SourceName,
+		SyncedAt:   store.NowMS(),
+	}); err != nil {
+		return 0, err
+	}
+	if err := st.UpsertRawRecord(ctx, store.RawRecord{
+		Source: SourceName, RecordTable: "database", RecordID: id, ParentID: parent.string("page_id"),
+		SpaceID: parent.string("workspace"), RawJSON: raw, SyncedAt: store.NowMS(),
+	}); err != nil {
+		return 0, err
+	}
+	return c.queryDatabase(ctx, st, id)
+}
+
+func (c Client) queryDatabase(ctx context.Context, st *store.Store, databaseID string) (int, error) {
+	var count int
+	cursor := ""
+	for {
+		body := obj{"page_size": 100}
+		if cursor != "" {
+			body["start_cursor"] = cursor
+		}
+		var resp obj
+		path := fmt.Sprintf("/databases/%s/query", url.PathEscape(databaseID))
+		if err := c.do(ctx, http.MethodPost, path, body, &resp); err != nil {
+			return count, err
+		}
+		for _, item := range asSlice(resp["results"]) {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, _, err := c.ingestPage(ctx, st, obj(m), ingestPageOptions{CollectionID: databaseID}); err != nil {
+				return count, err
+			}
+			count++
+		}
+		if !truthy(resp["has_more"]) {
+			return count, nil
+		}
+		cursor, _ = resp["next_cursor"].(string)
+		if cursor == "" {
+			return count, nil
+		}
+	}
 }
 
 func (c Client) walkBlocks(ctx context.Context, st *store.Store, pageID, parentID, spaceID string) (int, error) {
@@ -404,4 +508,13 @@ func asSlice(v any) []any {
 		return s
 	}
 	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

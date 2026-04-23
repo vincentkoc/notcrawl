@@ -23,11 +23,13 @@ V1 scope:
 - official Notion API sync
 - pages and blocks
 - databases/data sources as collections
+- database rows as pages linked to their collection
 - comments and discussions where available
 - users and spaces/workspaces
 - FTS5 search over rendered page/comment text
 - raw SQL access
 - Markdown export
+- CSV/TSV export for database rows
 - git-backed archive publishing and subscription
 
 Out of scope for V1:
@@ -130,3 +132,25 @@ pages/**/*.md
 SQLite without requiring Notion credentials.
 
 `update` pulls the latest snapshot and imports it.
+
+## Database Export
+
+API sync discovers databases visible to the integration, stores database
+metadata in `collections`, queries each database for row pages, and links those
+pages through `pages.collection_id`.
+
+`export-db` renders row properties into delimited text:
+
+```text
+notcrawl export-db --database <database-id> --format csv --output rows.csv
+notcrawl export-db --database <database-id> --format tsv --output rows.tsv
+```
+
+The first columns are stable metadata:
+
+- `page_id`
+- `page_title`
+- `url`
+
+Remaining columns come from the database schema, with any extra row properties
+appended alphabetically.
