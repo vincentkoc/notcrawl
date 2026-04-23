@@ -28,7 +28,7 @@ V1 scope:
 - users and spaces/workspaces
 - FTS5 search over rendered page/comment text
 - raw SQL access
-- archive status and SQLite maintenance commands
+- archive status, activity reporting, and SQLite maintenance commands
 - Markdown export
 - CSV/TSV export for database rows
 - git-backed archive publishing and subscription
@@ -83,6 +83,9 @@ SQLite is canonical. Markdown is generated output.
 Store startup must enable WAL, foreign keys, a busy timeout, normal
 synchronous writes, in-memory temp storage, and the crawler query indexes needed
 for common page, collection, comment, raw-record, and sync-state lookups.
+
+`report` must provide a SQL-free archive summary: total records, recent edited
+page/comment windows, top databases, top spaces, and recently edited pages.
 
 Core tables:
 
