@@ -1,6 +1,9 @@
 name: Release Drafter
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
   pull_request_target:
     types:
@@ -28,7 +31,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update_release_draft:
-    if: github.event_name == 'workflow_dispatch'
+    name: Update Release Draft
+    if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
       - name: Draft release notes
