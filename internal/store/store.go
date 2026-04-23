@@ -16,19 +16,28 @@ import (
 const schemaVersion = 1
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	if err := ensureDBFile(path); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	st := &Store{db: db}
+	db.SetMaxIdleConns(1)
+	if err := db.PingContext(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	st := &Store{db: db, path: path}
 	if err := st.init(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -36,18 +45,85 @@ func Open(path string) (*Store, error) {
 	return st, nil
 }
 
+func sqliteDSN(path string) string {
+	pragmas := "_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(268435456)&_pragma=busy_timeout(5000)"
+	if path == ":memory:" {
+		return "file::memory:?cache=shared&" + pragmas
+	}
+	if strings.HasPrefix(path, "file:") {
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		return path + sep + pragmas
+	}
+	return "file:" + path + "?" + pragmas
+}
+
+func ensureDBFile(path string) error {
+	if path == ":memory:" || strings.HasPrefix(path, "file:") {
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return os.Chmod(path, 0o600)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if file != nil {
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
 func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
 	return s.db.Close()
+}
+
+type Status struct {
+	DBPath      string `json:"db_path"`
+	DBBytes     int64  `json:"db_bytes"`
+	WALBytes    int64  `json:"wal_bytes"`
+	Spaces      int    `json:"spaces"`
+	Users       int    `json:"users"`
+	Pages       int    `json:"pages"`
+	Blocks      int    `json:"blocks"`
+	Collections int    `json:"collections"`
+	Comments    int    `json:"comments"`
+	RawRecords  int    `json:"raw_records"`
+	LastSyncAt  int64  `json:"last_sync_at"`
+}
+
+type MaintenanceSummary struct {
+	RebuiltFTS bool   `json:"rebuilt_fts"`
+	Optimized  bool   `json:"optimized"`
+	Analyzed   bool   `json:"analyzed"`
+	Vacuumed   bool   `json:"vacuumed"`
+	DBBytes    int64  `json:"db_bytes"`
+	WALBytes   int64  `json:"wal_bytes"`
+	Message    string `json:"message"`
 }
 
 func (s *Store) init(ctx context.Context) error {
 	stmts := []string{
 		`pragma foreign_keys = on`,
 		`pragma journal_mode = wal`,
+		`pragma synchronous = normal`,
+		`pragma temp_store = memory`,
+		`pragma mmap_size = 268435456`,
+		`pragma busy_timeout = 5000`,
 		`create table if not exists meta (key text primary key, value text not null)`,
 		`create table if not exists spaces (
 			id text primary key,
@@ -82,6 +158,10 @@ func (s *Store) init(ctx context.Context) error {
 			raw_json text,
 			synced_at integer not null
 		)`,
+		`create index if not exists pages_collection_id on pages(collection_id)`,
+		`create index if not exists pages_parent_id on pages(parent_id)`,
+		`create index if not exists pages_last_edited_time on pages(last_edited_time desc)`,
+		`create index if not exists pages_source_synced_at on pages(source, synced_at desc)`,
 		`create table if not exists blocks (
 			id text primary key,
 			page_id text,
@@ -101,6 +181,7 @@ func (s *Store) init(ctx context.Context) error {
 			synced_at integer not null
 		)`,
 		`create index if not exists blocks_page_id on blocks(page_id)`,
+		`create index if not exists blocks_page_alive_created on blocks(page_id, alive, created_time, id)`,
 		`create index if not exists blocks_parent_id on blocks(parent_id)`,
 		`create table if not exists collections (
 			id text primary key,
@@ -113,6 +194,8 @@ func (s *Store) init(ctx context.Context) error {
 			source text not null,
 			synced_at integer not null
 		)`,
+		`create index if not exists collections_parent_id on collections(parent_id)`,
+		`create index if not exists collections_name on collections(name)`,
 		`create table if not exists comments (
 			id text primary key,
 			page_id text,
@@ -127,6 +210,8 @@ func (s *Store) init(ctx context.Context) error {
 			source text not null,
 			synced_at integer not null
 		)`,
+		`create index if not exists comments_page_id on comments(page_id)`,
+		`create index if not exists comments_created_time on comments(created_time, id)`,
 		`create table if not exists raw_records (
 			source text not null,
 			record_table text not null,
@@ -137,6 +222,7 @@ func (s *Store) init(ctx context.Context) error {
 			synced_at integer not null,
 			primary key (source, record_table, record_id)
 		)`,
+		`create index if not exists raw_records_parent on raw_records(parent_id, record_table)`,
 		`create table if not exists sync_state (
 			source text not null,
 			entity_type text not null,
@@ -145,6 +231,7 @@ func (s *Store) init(ctx context.Context) error {
 			synced_at integer not null,
 			primary key (source, entity_type, entity_id)
 		)`,
+		`create index if not exists sync_state_synced_at on sync_state(synced_at desc)`,
 		`create virtual table if not exists page_fts using fts5(page_id unindexed, title, body)`,
 		`create virtual table if not exists comment_fts using fts5(comment_id unindexed, page_id unindexed, body)`,
 	}
@@ -390,4 +477,72 @@ func (s *Store) RebuildFTS(ctx context.Context) error {
 	}
 	_, err = s.db.ExecContext(ctx, `insert into comment_fts(comment_id, page_id, body) select id, page_id, text from comments where alive = 1`)
 	return err
+}
+
+func (s *Store) Status(ctx context.Context) (Status, error) {
+	status := Status{DBPath: s.path}
+	counts := []struct {
+		query string
+		dest  *int
+	}{
+		{`select count(*) from spaces`, &status.Spaces},
+		{`select count(*) from users`, &status.Users},
+		{`select count(*) from pages`, &status.Pages},
+		{`select count(*) from blocks`, &status.Blocks},
+		{`select count(*) from collections`, &status.Collections},
+		{`select count(*) from comments`, &status.Comments},
+		{`select count(*) from raw_records`, &status.RawRecords},
+	}
+	for _, count := range counts {
+		if err := s.db.QueryRowContext(ctx, count.query).Scan(count.dest); err != nil {
+			return Status{}, err
+		}
+	}
+	if err := s.db.QueryRowContext(ctx, `select coalesce(max(synced_at), 0) from sync_state`).Scan(&status.LastSyncAt); err != nil {
+		return Status{}, err
+	}
+	status.DBBytes = fileSize(s.path)
+	status.WALBytes = fileSize(s.path + "-wal")
+	return status, nil
+}
+
+func (s *Store) Optimize(ctx context.Context, vacuum bool) (MaintenanceSummary, error) {
+	if err := s.RebuildFTS(ctx); err != nil {
+		return MaintenanceSummary{}, err
+	}
+	for _, stmt := range []string{
+		`insert into page_fts(page_fts) values('optimize')`,
+		`insert into comment_fts(comment_fts) values('optimize')`,
+		`pragma optimize`,
+		`analyze`,
+	} {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return MaintenanceSummary{}, err
+		}
+	}
+	if vacuum {
+		if _, err := s.db.ExecContext(ctx, `vacuum`); err != nil {
+			return MaintenanceSummary{}, err
+		}
+	}
+	return MaintenanceSummary{
+		RebuiltFTS: true,
+		Optimized:  true,
+		Analyzed:   true,
+		Vacuumed:   vacuum,
+		DBBytes:    fileSize(s.path),
+		WALBytes:   fileSize(s.path + "-wal"),
+		Message:    "database maintenance complete",
+	}, nil
+}
+
+func fileSize(path string) int64 {
+	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
+		return 0
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }

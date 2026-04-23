@@ -21,9 +21,11 @@ to without holding Notion credentials.
 - read-only local desktop cache ingestion from macOS Notion
 - official API page/block/user/comment ingestion
 - Notion database metadata and row ingestion through the official API
+- current Notion data-source API support plus legacy database endpoint support
 - normalized Markdown export organized by space and page path
 - CSV/TSV export for crawled Notion database rows
 - compressed JSONL git-share snapshots plus import/update workflows
+- archive status and SQLite maintenance commands
 - read-only SQL access for ad hoc inspection
 
 ## Install
@@ -43,6 +45,7 @@ Use the local Notion Desktop cache:
 ```bash
 notcrawl init
 notcrawl doctor
+notcrawl status
 notcrawl sync --source desktop
 notcrawl export-md
 notcrawl search "launch plan"
@@ -69,6 +72,8 @@ Default paths:
 
 - `init` writes a starter config
 - `doctor` checks config, SQLite, desktop cache, and token presence
+- `status` prints archive counts, last sync time, and database/WAL size
+- `maintain` rebuilds FTS, optimizes SQLite indexes, and can run `VACUUM`
 - `sync` ingests from `desktop`, `api`, or `all`
 - `export-md` renders normalized Markdown files from SQLite
 - `databases` lists crawled Notion databases

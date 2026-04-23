@@ -14,6 +14,7 @@ import (
 const (
 	defaultDirName     = ".notcrawl"
 	defaultDesktopPath = "~/Library/Application Support/Notion/notion.db"
+	defaultAPIVersion  = "2026-03-11"
 )
 
 type Config struct {
@@ -60,7 +61,7 @@ func Default() Config {
 				Enabled:  true,
 				TokenEnv: "NOTION_TOKEN",
 				BaseURL:  "https://api.notion.com/v1",
-				Version:  "2022-06-28",
+				Version:  defaultAPIVersion,
 			},
 		},
 		Share: ShareConfig{
@@ -150,7 +151,7 @@ func (c *Config) Resolve() error {
 		c.Notion.API.BaseURL = "https://api.notion.com/v1"
 	}
 	if strings.TrimSpace(c.Notion.API.Version) == "" {
-		c.Notion.API.Version = "2022-06-28"
+		c.Notion.API.Version = defaultAPIVersion
 	}
 	if strings.TrimSpace(c.Share.Branch) == "" {
 		c.Share.Branch = "main"

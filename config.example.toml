@@ -10,7 +10,7 @@ path = ""
 enabled = true
 token_env = "NOTION_TOKEN"
 base_url = "https://api.notion.com/v1"
-version = "2022-06-28"
+version = "2026-03-11"
 
 [share]
 remote = ""

@@ -66,6 +66,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	switch cmd {
 	case "doctor":
 		return runDoctor(ctx, stdout, cfg)
+	case "status":
+		return runStatus(ctx, stdout, cfg)
+	case "maintain":
+		return runMaintain(ctx, stdout, cfg, cmdArgs)
 	case "sync":
 		return runSync(ctx, stdout, cfg, cmdArgs)
 	case "export-md":
@@ -109,8 +113,54 @@ func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 		"api_token_env":     cfg.Notion.API.TokenEnv,
 		"api_token_present": cfg.APIToken() != "",
 	}
-	_ = ctx
+	status, err := st.Status(ctx)
+	if err != nil {
+		return err
+	}
+	report["status"] = status
+	report["api_version"] = cfg.Notion.API.Version
 	b, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, string(b))
+	return nil
+}
+
+func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config) error {
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	status, err := st.Status(ctx)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, string(b))
+	return nil
+}
+
+func runMaintain(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("maintain", flag.ContinueOnError)
+	vacuum := fs.Bool("vacuum", false, "run VACUUM after rebuilding and optimizing indexes")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	summary, err := st.Optimize(ctx, *vacuum)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -405,6 +455,8 @@ Global flags:
 Commands:
   init                      Write a starter config
   doctor                    Check config, database, desktop cache, and token
+  status                    Show archive counts and database size
+  maintain [--vacuum]       Rebuild FTS and optimize SQLite indexes
   sync --source desktop     Ingest Notion Desktop cache
   sync --source api         Ingest through the official Notion API
   sync --source all         Run enabled sources

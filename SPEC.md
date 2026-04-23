@@ -22,12 +22,13 @@ V1 scope:
 - read-only desktop snapshot ingestion
 - official Notion API sync
 - pages and blocks
-- databases/data sources as collections
+- databases/data sources as collections, including current data-source API endpoints
 - database rows as pages linked to their collection
 - comments and discussions where available
 - users and spaces/workspaces
 - FTS5 search over rendered page/comment text
 - raw SQL access
+- archive status and SQLite maintenance commands
 - Markdown export
 - CSV/TSV export for database rows
 - git-backed archive publishing and subscription
@@ -72,9 +73,16 @@ API sync uses `NOTION_TOKEN` by default. It must:
 5. obey `Retry-After` on rate limits
 6. store raw JSON plus normalized rows
 
+New configs should use the current Notion API version. Existing configs pinned
+to legacy `2022-06-28` must continue using deprecated database query endpoints.
+
 ## SQLite Archive
 
 SQLite is canonical. Markdown is generated output.
+
+Store startup must enable WAL, foreign keys, a busy timeout, normal
+synchronous writes, in-memory temp storage, and the crawler query indexes needed
+for common page, collection, comment, raw-record, and sync-state lookups.
 
 Core tables:
 
@@ -135,9 +143,9 @@ SQLite without requiring Notion credentials.
 
 ## Database Export
 
-API sync discovers databases visible to the integration, stores database
-metadata in `collections`, queries each database for row pages, and links those
-pages through `pages.collection_id`.
+API sync discovers databases/data sources visible to the integration, stores
+metadata in `collections`, queries each collection for row pages, and links
+those pages through `pages.collection_id`.
 
 `export-db` renders row properties into delimited text:
 
