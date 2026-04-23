@@ -1,6 +1,6 @@
 <img src="docs/notcrawl_banner.jpg" alt="notcrawl banner"/>
 
-# notcrawl
+# 📰 notcrawl
 
 `notcrawl` mirrors Notion workspace data into local SQLite and normalized
 Markdown so you can search, query, diff, and share your Notion memory without
