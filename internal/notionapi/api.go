@@ -398,7 +398,7 @@ func (c Client) ingestComments(ctx context.Context, st *store.Store, pageID, spa
 		}
 		var resp obj
 		if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not_found") {
+			if isIgnoredCommentError(err) {
 				return count, nil
 			}
 			return count, err
@@ -476,9 +476,47 @@ func (c Client) do(ctx context.Context, method, path string, body any, out any) 
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("notion api %s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(b)))
+		bodyText := strings.TrimSpace(string(b))
+		apiErr := notionAPIError{Method: method, Path: path, Status: resp.Status, StatusCode: resp.StatusCode, Body: bodyText}
+		var payload struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(b, &payload); err == nil {
+			apiErr.Code = payload.Code
+			apiErr.Message = payload.Message
+		}
+		return apiErr
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+type notionAPIError struct {
+	Method     string
+	Path       string
+	Status     string
+	StatusCode int
+	Code       string
+	Message    string
+	Body       string
+}
+
+func (e notionAPIError) Error() string {
+	if e.Code != "" || e.Message != "" {
+		return fmt.Sprintf("notion api %s %s: %s: %s: %s", e.Method, e.Path, e.Status, e.Code, e.Message)
+	}
+	return fmt.Sprintf("notion api %s %s: %s: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+func isIgnoredCommentError(err error) bool {
+	apiErr, ok := err.(notionAPIError)
+	if !ok {
+		return false
+	}
+	if apiErr.StatusCode == http.StatusNotFound || apiErr.Code == "not_found" {
+		return true
+	}
+	return apiErr.StatusCode == http.StatusForbidden && apiErr.Code == "restricted_resource"
 }
 
 func userName(u obj) string {
