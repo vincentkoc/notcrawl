@@ -126,6 +126,9 @@ func renderBlocks(b *strings.Builder, pageID string, blocks []store.Block) {
 	for parent := range children {
 		sort.SliceStable(children[parent], func(i, j int) bool {
 			a, z := children[parent][i], children[parent][j]
+			if a.DisplayOrder != z.DisplayOrder {
+				return a.DisplayOrder < z.DisplayOrder
+			}
 			if a.CreatedTime == z.CreatedTime {
 				return a.ID < z.ID
 			}

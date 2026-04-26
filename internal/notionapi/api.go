@@ -332,6 +332,7 @@ func (c Client) usesDataSourceAPI() bool {
 func (c Client) walkBlocks(ctx context.Context, st *store.Store, pageID, parentID, spaceID string) (int, error) {
 	var count int
 	cursor := ""
+	var displayOrder int64
 	for {
 		path := fmt.Sprintf("/blocks/%s/children?page_size=100", url.PathEscape(parentID))
 		if cursor != "" {
@@ -351,6 +352,7 @@ func (c Client) walkBlocks(ctx context.Context, st *store.Store, pageID, parentI
 			typeBody := block[typ]
 			text := notiontext.Plain(typeBody)
 			raw := notiontext.MarshalRaw(block)
+			displayOrder++
 			if err := st.UpsertBlock(ctx, store.Block{
 				ID:             block.string("id"),
 				PageID:         pageID,
@@ -360,6 +362,7 @@ func (c Client) walkBlocks(ctx context.Context, st *store.Store, pageID, parentI
 				Type:           typ,
 				Text:           text,
 				PropertiesJSON: marshalAny(typeBody),
+				DisplayOrder:   displayOrder,
 				CreatedTime:    parseTimeMS(block.string("created_time")),
 				LastEditedTime: parseTimeMS(block.string("last_edited_time")),
 				Alive:          !block.bool("archived") && !block.bool("in_trash"),

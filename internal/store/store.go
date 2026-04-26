@@ -173,6 +173,7 @@ func (s *Store) init(ctx context.Context) error {
 			properties_json text,
 			content_json text,
 			format_json text,
+			display_order integer not null default 0,
 			created_time integer,
 			last_edited_time integer,
 			alive integer not null,
@@ -181,7 +182,6 @@ func (s *Store) init(ctx context.Context) error {
 			synced_at integer not null
 		)`,
 		`create index if not exists blocks_page_id on blocks(page_id)`,
-		`create index if not exists blocks_page_alive_created on blocks(page_id, alive, created_time, id)`,
 		`create index if not exists blocks_parent_id on blocks(parent_id)`,
 		`create table if not exists collections (
 			id text primary key,
@@ -249,10 +249,45 @@ func (s *Store) init(ctx context.Context) error {
 	if current > schemaVersion {
 		return fmt.Errorf("database schema version %d is newer than this notcrawl build supports (%d)", current, schemaVersion)
 	}
+	if err := s.ensureColumn(ctx, "blocks", "display_order", "integer not null default 0"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `create index if not exists blocks_page_alive_order on blocks(page_id, alive, parent_id, display_order, created_time, id)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `create index if not exists blocks_page_alive_created on blocks(page_id, alive, created_time, id)`); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `insert or replace into meta(key, value) values('schema_version', ?)`, schemaVersion); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `pragma table_info(`+table+`)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `alter table `+table+` add column `+column+` `+definition)
+	return err
 }
 
 func NowMS() int64 {
@@ -318,8 +353,8 @@ func (s *Store) UpsertPage(ctx context.Context, x Page) error {
 func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 	_, err := s.db.ExecContext(ctx, `insert into blocks(
 		id, page_id, space_id, parent_id, parent_table, type, text, properties_json, content_json, format_json,
-		created_time, last_edited_time, alive, source, raw_json, synced_at)
-		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		display_order, created_time, last_edited_time, alive, source, raw_json, synced_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		on conflict(id) do update set
 			page_id=excluded.page_id,
 			space_id=excluded.space_id,
@@ -330,6 +365,7 @@ func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 			properties_json=excluded.properties_json,
 			content_json=excluded.content_json,
 			format_json=excluded.format_json,
+			display_order=excluded.display_order,
 			created_time=excluded.created_time,
 			last_edited_time=excluded.last_edited_time,
 			alive=excluded.alive,
@@ -337,7 +373,7 @@ func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 			raw_json=excluded.raw_json,
 			synced_at=excluded.synced_at`,
 		x.ID, x.PageID, x.SpaceID, x.ParentID, x.ParentTable, x.Type, x.Text, x.PropertiesJSON, x.ContentJSON, x.FormatJSON,
-		x.CreatedTime, x.LastEditedTime, BoolInt(x.Alive), x.Source, x.RawJSON, x.SyncedAt)
+		x.DisplayOrder, x.CreatedTime, x.LastEditedTime, BoolInt(x.Alive), x.Source, x.RawJSON, x.SyncedAt)
 	if err != nil {
 		return err
 	}
@@ -401,7 +437,7 @@ func (s *Store) refreshPageFTS(ctx context.Context, pageID string) error {
 		}
 		return err
 	}
-	rows, err := s.db.QueryContext(ctx, `select text from blocks where page_id = ? and alive = 1 order by created_time, id`, pageID)
+	rows, err := s.db.QueryContext(ctx, `select text from blocks where page_id = ? and alive = 1 order by parent_id, display_order, created_time, id`, pageID)
 	if err != nil {
 		return err
 	}
