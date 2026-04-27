@@ -104,7 +104,9 @@ Core tables:
 
 ## Markdown Archive
 
-Markdown export writes deterministic paths:
+Markdown export writes deterministic Unicode-safe paths. Path components keep
+readable letters, numbers, CJK text, and emoji while replacing filesystem path
+separators and unsafe punctuation with dashes:
 
 ```text
 pages/<space-slug>/<page-title>-<short-id>.md

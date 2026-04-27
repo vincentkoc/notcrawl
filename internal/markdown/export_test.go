@@ -78,3 +78,29 @@ func TestExporterUsesDisplayOrder(t *testing.T) {
 		t.Fatalf("markdown did not preserve display order:\n%s", text)
 	}
 }
+
+func TestExporterPreservesUnicodePathNames(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := store.NowMS()
+	if err := st.UpsertSpace(ctx, store.Space{ID: "space1", Name: "研究 🚀", Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", SpaceID: "space1", Title: "計画 ✅ / Q2", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	s, err := Exporter{Store: st, Dir: dir}.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "研究-🚀", "計画-✅-q2-page1.md")
+	if len(s.Files) != 1 || s.Files[0] != want {
+		t.Fatalf("unexpected export path: %+v, want %s", s.Files, want)
+	}
+}

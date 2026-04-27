@@ -22,7 +22,7 @@ to without holding Notion credentials.
 - official API page/block/user/comment ingestion
 - Notion database metadata and row ingestion through the official API
 - current Notion data-source API support plus legacy database endpoint support
-- normalized Markdown export organized by space and page path
+- normalized Markdown export organized by Unicode-safe space and page paths
 - CSV/TSV export for crawled Notion database rows
 - compressed JSONL git-share snapshots plus import/update workflows
 - archive status, activity reporting, and SQLite maintenance commands

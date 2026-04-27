@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var spaceRE = regexp.MustCompile(`\s+`)
@@ -60,8 +61,8 @@ func MarkdownEscape(s string) string {
 
 func ShortID(id string) string {
 	clean := strings.ReplaceAll(id, "-", "")
-	if len(clean) > 8 {
-		return clean[:8]
+	if len(clean) > 16 {
+		return clean[:8] + "-" + clean[len(clean)-8:]
 	}
 	if clean == "" {
 		return "unknown"
@@ -73,13 +74,22 @@ func Slug(s string) string {
 	s = strings.ToLower(Normalize(s))
 	var b strings.Builder
 	lastDash := false
+	wrote := false
 	for _, r := range s {
 		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		case isSlugRune(r):
 			b.WriteRune(r)
 			lastDash = false
-		case r == '-' || r == '_' || r == ' ' || r == '/' || r == '.':
-			if !lastDash {
+			wrote = true
+		case isSlugSeparator(r):
+			if wrote && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		case unicode.IsControl(r):
+			continue
+		default:
+			if wrote && !lastDash {
 				b.WriteByte('-')
 				lastDash = true
 			}
@@ -90,6 +100,14 @@ func Slug(s string) string {
 		return "untitled"
 	}
 	return out
+}
+
+func isSlugRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || (r > unicode.MaxASCII && unicode.IsSymbol(r)) || r == '\u200d'
+}
+
+func isSlugSeparator(r rune) bool {
+	return unicode.IsSpace(r) || strings.ContainsRune(`-_/.\:;`, r)
 }
 
 func MarshalRaw(m map[string]any) string {
