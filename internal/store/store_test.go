@@ -34,6 +34,60 @@ func TestStoreUpsertsAndSearchesPage(t *testing.T) {
 	}
 }
 
+func TestStoreSearchRanksByRelevanceThenRecency(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := NowMS()
+	pages := []Page{
+		{ID: "old", Title: "Old", LastEditedTime: now - 1000, Alive: true, Source: "test", SyncedAt: now},
+		{ID: "new", Title: "New", LastEditedTime: now, Alive: true, Source: "test", SyncedAt: now},
+	}
+	for _, page := range pages {
+		if err := st.UpsertPage(ctx, page); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.UpsertBlock(ctx, Block{ID: page.ID + "-block", PageID: page.ID, Type: "text", Text: "needle", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	results, err := st.Search(ctx, "needle", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) < 2 || results[0].ID != "new" || results[1].ID != "old" {
+		t.Fatalf("expected newer equal-rank page first, got %+v", results)
+	}
+}
+
+func TestStoreSearchIncludesComments(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := NowMS()
+	if err := st.UpsertPage(ctx, Page{ID: "page1", Title: "Launch", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertComment(ctx, Comment{ID: "comment1", PageID: "page1", Text: "needle from a comment", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := st.Search(ctx, "needle", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Kind != "comment" || results[0].ID != "comment1" || results[0].Title != "Launch" {
+		t.Fatalf("expected comment search result with page title, got %+v", results)
+	}
+}
+
 func TestStoreDefersPageFTSRefresh(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
 	if err != nil {
