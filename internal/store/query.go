@@ -197,14 +197,14 @@ func (s *Store) SpaceName(ctx context.Context, id string) (string, error) {
 	err := s.queryRowContext(ctx, `select name from spaces where id = ?`, id).Scan(&name)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "space-" + shortID(id), nil
+			return fallbackSpaceName(id), nil
 		}
 		return "", err
 	}
 	if name.Valid && name.String != "" {
 		return name.String, nil
 	}
-	return "space-" + shortID(id), nil
+	return fallbackSpaceName(id), nil
 }
 
 func (s *Store) TeamName(ctx context.Context, id string) (string, error) {
@@ -276,4 +276,8 @@ func shortID(id string) string {
 		return "unknown"
 	}
 	return clean
+}
+
+func fallbackSpaceName(id string) string {
+	return "External Space " + shortID(id)
 }

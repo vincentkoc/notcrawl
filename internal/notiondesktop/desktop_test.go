@@ -1,10 +1,15 @@
 package notiondesktop
 
 import (
+	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vincentkoc/notcrawl/internal/store"
+	_ "modernc.org/sqlite"
 )
 
 func TestPruneDesktopSnapshotsKeepsNewestAndSidecars(t *testing.T) {
@@ -53,5 +58,53 @@ func TestPruneDesktopSnapshotsKeepsNewestAndSidecars(t *testing.T) {
 		if _, err := os.Stat(target); !os.IsNotExist(err) {
 			t.Fatalf("expected %s to be pruned, got %v", target, err)
 		}
+	}
+}
+
+func TestIngestBlocksDerivesUntitledPageFromChildText(t *testing.T) {
+	ctx := context.Background()
+	src, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "desktop.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	if _, err := src.ExecContext(ctx, `create table block (
+		id text primary key,
+		space_id text,
+		type text,
+		properties text,
+		content text,
+		collection_id text,
+		created_time integer,
+		last_edited_time integer,
+		parent_id text,
+		parent_table text,
+		alive integer,
+		format text
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.ExecContext(ctx, `insert into block(id, space_id, type, properties, content, collection_id, created_time, last_edited_time, parent_id, parent_table, alive, format)
+		values
+		('page1', 'space1', 'page', '{}', '', '', 1, 1, '', '', 1, ''),
+		('child1', 'space1', 'text', '{"title":[["Decision log"]]}', '', '', 2, 2, 'page1', 'block', 1, '')`); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, _, _, err := ingestBlocks(ctx, st, src); err != nil {
+		t.Fatal(err)
+	}
+
+	var title string
+	if err := st.DB().QueryRowContext(ctx, `select title from pages where id = 'page1'`).Scan(&title); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Decision log" {
+		t.Fatalf("expected child text title, got %q", title)
 	}
 }
