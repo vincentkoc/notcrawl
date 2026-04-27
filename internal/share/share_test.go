@@ -39,6 +39,35 @@ func TestPublishAndImportSnapshot(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, "pages", "default", "launch-page1.md")); err != nil {
 		t.Fatal(err)
 	}
+	stalePage := filepath.Join(repo, "pages", "default", "stale.md")
+	if err := os.WriteFile(stalePage, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pageSidecar := filepath.Join(repo, "pages", "default", "README.txt")
+	if err := os.WriteFile(pageSidecar, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleData := filepath.Join(repo, "data", "stale.jsonl.gz")
+	if err := os.WriteFile(staleData, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataSidecar := filepath.Join(repo, "data", "README.txt")
+	if err := os.WriteFile(dataSidecar, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Publish(ctx, src, PublishOptions{RepoPath: repo, MarkdownDir: mdDir}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{stalePage, staleData} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected generated stale file %s to be pruned, got %v", path, err)
+		}
+	}
+	for _, path := range []string{pageSidecar, dataSidecar} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected sidecar %s to remain: %v", path, err)
+		}
+	}
 	dst, err := store.Open(filepath.Join(t.TempDir(), "dst.db"))
 	if err != nil {
 		t.Fatal(err)

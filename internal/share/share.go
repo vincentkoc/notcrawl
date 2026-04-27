@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vincentkoc/notcrawl/internal/store"
@@ -70,27 +72,41 @@ func Publish(ctx context.Context, st *store.Store, opts PublishOptions) (Publish
 	if err := ensureRepo(ctx, opts.RepoPath, opts.Remote, opts.Branch); err != nil {
 		return PublishSummary{}, err
 	}
-	if err := os.RemoveAll(filepath.Join(opts.RepoPath, "data")); err != nil {
+	dataRoot := filepath.Join(opts.RepoPath, "data")
+	pagesRoot := filepath.Join(opts.RepoPath, "pages")
+	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
 		return PublishSummary{}, err
 	}
-	if err := os.RemoveAll(filepath.Join(opts.RepoPath, "pages")); err != nil {
-		return PublishSummary{}, err
-	}
-	if err := os.MkdirAll(filepath.Join(opts.RepoPath, "data"), 0o755); err != nil {
+	if err := os.MkdirAll(pagesRoot, 0o755); err != nil {
 		return PublishSummary{}, err
 	}
 	manifest := Manifest{GeneratedAt: time.Now().UTC().Format(time.RFC3339)}
+	dataKeep := map[string]bool{}
 	for _, table := range exportTables {
 		tm, err := exportTable(ctx, st.DB(), opts.RepoPath, table)
 		if err != nil {
 			return PublishSummary{}, err
 		}
 		manifest.Tables = append(manifest.Tables, tm)
+		dataKeep[filepath.Clean(filepath.Join(opts.RepoPath, tm.Path))] = true
 	}
+	if err := pruneGeneratedFiles(dataRoot, dataKeep, func(path string) bool {
+		return strings.HasSuffix(path, ".jsonl.gz")
+	}); err != nil {
+		return PublishSummary{}, err
+	}
+	pagesKeep := map[string]bool{}
 	if opts.MarkdownDir != "" {
-		if err := copyDir(opts.MarkdownDir, filepath.Join(opts.RepoPath, "pages")); err != nil && !os.IsNotExist(err) {
+		var err error
+		pagesKeep, err = copyDir(opts.MarkdownDir, pagesRoot)
+		if err != nil && !os.IsNotExist(err) {
 			return PublishSummary{}, err
 		}
+	}
+	if err := pruneGeneratedFiles(pagesRoot, pagesKeep, func(path string) bool {
+		return strings.HasSuffix(path, ".md")
+	}); err != nil {
+		return PublishSummary{}, err
 	}
 	b, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -317,15 +333,16 @@ func run(ctx context.Context, dir, name string, args ...string) error {
 	return nil
 }
 
-func copyDir(src, dst string) error {
+func copyDir(src, dst string) (map[string]bool, error) {
 	info, err := os.Stat(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", src)
+		return nil, fmt.Errorf("not a directory: %s", src)
 	}
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+	keep := map[string]bool{}
+	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -350,9 +367,51 @@ func copyDir(src, dst string) error {
 			return err
 		}
 		defer out.Close()
-		_, err = io.Copy(out, in)
-		return err
+		if _, err := io.Copy(out, in); err != nil {
+			return err
+		}
+		keep[filepath.Clean(target)] = true
+		return nil
 	})
+	return keep, err
+}
+
+func pruneGeneratedFiles(root string, keep map[string]bool, shouldPrune func(string) bool) error {
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var dirs []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if d.IsDir() {
+			dirs = append(dirs, path)
+			return nil
+		}
+		clean := filepath.Clean(path)
+		if shouldPrune(clean) && !keep[clean] {
+			return os.Remove(clean)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+	for _, dir := range dirs {
+		if err := os.Remove(dir); err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+			return err
+		}
+	}
+	return nil
 }
 
 func exportValue(v any) any {
