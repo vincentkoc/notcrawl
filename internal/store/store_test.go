@@ -109,6 +109,42 @@ func TestStoreTransactionCommitsAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestStoreEnsuresFallbackSpaces(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := NowMS()
+	spaceID := "52f1c029-1111-2222-3333-ea9259e0"
+	if err := st.UpsertPage(ctx, Page{ID: "page1", SpaceID: spaceID, Title: "Loose", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := st.EnsureSpaceFallbacks(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Fatalf("expected one fallback space, got %d", added)
+	}
+	name, err := st.SpaceName(ctx, spaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "External Space 52f1c029-ea9259e0" {
+		t.Fatalf("unexpected fallback space name: %q", name)
+	}
+	added, err = st.EnsureSpaceFallbacks(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 {
+		t.Fatalf("expected fallback insertion to be idempotent, got %d", added)
+	}
+}
+
 func TestStoreOrdersBlocksByDisplayOrder(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
 	if err != nil {

@@ -85,6 +85,11 @@ func Ingest(ctx context.Context, st *store.Store, path, cacheDir string) (Summar
 			if s.Comments, err = ingestComments(ctx, st, db); err != nil {
 				return err
 			}
+			addedSpaces, err := st.EnsureSpaceFallbacks(ctx, SourceName)
+			if err != nil {
+				return err
+			}
+			s.Spaces += addedSpaces
 			return nil
 		})
 	}); err != nil {
@@ -316,6 +321,7 @@ type localBlock struct {
 	Alive          bool
 	FormatJSON     string
 	RawJSON        string
+	Text           string
 }
 
 func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, blocks int, rawRecords int, err error) {
@@ -340,6 +346,7 @@ func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, 
 			return pages, blocks, rawRecords, err
 		}
 		b.Alive = alive != 0
+		b.Text = blockText(b.PropertiesJSON)
 		byID[b.ID] = b
 		all = append(all, b)
 	}
@@ -366,11 +373,8 @@ func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, 
 		return ""
 	}
 	pageFor = func(id string) string { return resolve(id, map[string]bool{}) }
+	children := childBlocksByParent(all)
 	for _, b := range all {
-		title := notiontext.TitleFromProperties(b.PropertiesJSON)
-		if title == "" && isPageType(b.Type) {
-			title = "Untitled"
-		}
 		if isPageType(b.Type) {
 			if err := st.UpsertPage(ctx, store.Page{
 				ID:             b.ID,
@@ -378,7 +382,7 @@ func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, 
 				ParentID:       b.ParentID,
 				ParentTable:    b.ParentTable,
 				CollectionID:   b.CollectionID,
-				Title:          title,
+				Title:          pageTitle(b, children),
 				PropertiesJSON: b.PropertiesJSON,
 				CreatedTime:    b.CreatedTime,
 				LastEditedTime: b.LastEditedTime,
@@ -392,7 +396,6 @@ func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, 
 			pages++
 		}
 		pageID := pageFor(b.ID)
-		text := notiontext.PlainFromJSON(b.PropertiesJSON)
 		if err := st.UpsertBlock(ctx, store.Block{
 			ID:             b.ID,
 			PageID:         pageID,
@@ -400,7 +403,7 @@ func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, 
 			ParentID:       b.ParentID,
 			ParentTable:    b.ParentTable,
 			Type:           b.Type,
-			Text:           text,
+			Text:           b.Text,
 			PropertiesJSON: b.PropertiesJSON,
 			ContentJSON:    b.ContentJSON,
 			FormatJSON:     b.FormatJSON,
@@ -423,6 +426,73 @@ func ingestBlocks(ctx context.Context, st *store.Store, db *sql.DB) (pages int, 
 		rawRecords++
 	}
 	return pages, blocks, rawRecords, nil
+}
+
+func childBlocksByParent(blocks []localBlock) map[string][]localBlock {
+	children := map[string][]localBlock{}
+	for _, block := range blocks {
+		if !block.Alive || block.ParentID == "" {
+			continue
+		}
+		children[block.ParentID] = append(children[block.ParentID], block)
+	}
+	for parent := range children {
+		sort.SliceStable(children[parent], func(i, j int) bool {
+			a, z := children[parent][i], children[parent][j]
+			if a.CreatedTime == z.CreatedTime {
+				return a.ID < z.ID
+			}
+			return a.CreatedTime < z.CreatedTime
+		})
+	}
+	return children
+}
+
+func pageTitle(page localBlock, children map[string][]localBlock) string {
+	if title := notiontext.TitleFromProperties(page.PropertiesJSON); title != "" {
+		return title
+	}
+	if title := fallbackPageTitle(page.ID, children, map[string]bool{}); title != "" {
+		return title
+	}
+	return "Untitled"
+}
+
+func fallbackPageTitle(parentID string, children map[string][]localBlock, seen map[string]bool) string {
+	if parentID == "" || seen[parentID] {
+		return ""
+	}
+	seen[parentID] = true
+	for _, child := range children[parentID] {
+		if !isPageType(child.Type) {
+			if title := titleSnippet(child.Text); title != "" {
+				return title
+			}
+		}
+		if title := fallbackPageTitle(child.ID, children, seen); title != "" {
+			return title
+		}
+	}
+	return ""
+}
+
+func titleSnippet(s string) string {
+	s = notiontext.Normalize(s)
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) > 96 {
+		return string(runes[:96])
+	}
+	return s
+}
+
+func blockText(raw string) string {
+	if title := notiontext.TitleFromProperties(raw); title != "" {
+		return title
+	}
+	return notiontext.PlainFromJSON(raw)
 }
 
 func ingestComments(ctx context.Context, st *store.Store, db *sql.DB) (int, error) {

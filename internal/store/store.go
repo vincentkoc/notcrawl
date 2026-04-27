@@ -372,6 +372,47 @@ func (s *Store) UpsertSpace(ctx context.Context, x Space) error {
 	return err
 }
 
+func (s *Store) EnsureSpaceFallbacks(ctx context.Context, source string) (int, error) {
+	rows, err := s.queryContext(ctx, `select distinct space_id from (
+			select space_id from pages
+			union all select space_id from blocks
+			union all select space_id from teams
+			union all select space_id from collections
+			union all select space_id from comments
+			union all select space_id from raw_records
+		)
+		where coalesce(space_id, '') <> ''
+			and space_id not in (select id from spaces)`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	now := NowMS()
+	for _, id := range ids {
+		if err := s.UpsertSpace(ctx, Space{
+			ID:       id,
+			Name:     fallbackSpaceName(id),
+			RawJSON:  fmt.Sprintf(`{"id":%q,"inferred":true}`, id),
+			Source:   source,
+			SyncedAt: now,
+		}); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
+}
+
 func (s *Store) UpsertUser(ctx context.Context, x User) error {
 	_, err := s.execContext(ctx, `insert into users(id, name, email, raw_json, source, synced_at)
 		values (?, ?, ?, ?, ?, ?)
