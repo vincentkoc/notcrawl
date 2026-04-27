@@ -2,11 +2,13 @@ package markdown
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vincentkoc/notcrawl/internal/notiontext"
@@ -38,13 +40,18 @@ func (e Exporter) Export(ctx context.Context) (Summary, error) {
 		return Summary{}, err
 	}
 	var s Summary
+	keep := map[string]bool{}
 	for _, page := range pages {
 		path, err := e.writePage(ctx, page)
 		if err != nil {
 			return s, err
 		}
+		keep[filepath.Clean(path)] = true
 		s.Pages++
 		s.Files = append(s.Files, path)
+	}
+	if err := pruneStaleMarkdown(e.Dir, keep); err != nil {
+		return s, err
 	}
 	return s, nil
 }
@@ -209,6 +216,41 @@ func fallback(s, fallback string) string {
 		return s
 	}
 	return fallback
+}
+
+func pruneStaleMarkdown(root string, keep map[string]bool) error {
+	var dirs []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		path = filepath.Clean(path)
+		if d.IsDir() {
+			if path != filepath.Clean(root) {
+				dirs = append(dirs, path)
+			}
+			return nil
+		}
+		if filepath.Ext(path) == ".md" && !keep[path] {
+			return os.Remove(path)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+	for _, dir := range dirs {
+		if err := os.Remove(dir); err != nil && !isIgnorableRemoveDirError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func isIgnorableRemoveDirError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
 }
 
 func formatMS(ms int64) string {

@@ -104,3 +104,40 @@ func TestExporterPreservesUnicodePathNames(t *testing.T) {
 		t.Fatalf("unexpected export path: %+v, want %s", s.Files, want)
 	}
 }
+
+func TestExporterPrunesStaleMarkdown(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := store.NowMS()
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", Title: "Launch", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	staleDir := filepath.Join(dir, "old")
+	if err := os.MkdirAll(staleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleMarkdown := filepath.Join(staleDir, "stale.md")
+	if err := os.WriteFile(staleMarkdown, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keepNote := filepath.Join(staleDir, "note.txt")
+	if err := os.WriteFile(keepNote, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (Exporter{Store: st, Dir: dir}).Export(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(staleMarkdown); !os.IsNotExist(err) {
+		t.Fatalf("expected stale markdown to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(keepNote); err != nil {
+		t.Fatalf("expected non-markdown file to remain: %v", err)
+	}
+}

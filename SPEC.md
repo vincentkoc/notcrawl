@@ -112,6 +112,9 @@ separators and unsafe punctuation with dashes:
 pages/<space-slug>/<page-title>-<short-id>.md
 ```
 
+Each export removes stale generated `.md` files under the Markdown root while
+leaving non-Markdown sidecar files alone.
+
 Each file starts with YAML-ish front matter:
 
 ```yaml
