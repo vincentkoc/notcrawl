@@ -63,6 +63,37 @@ func TestStoreOrdersBlocksByDisplayOrder(t *testing.T) {
 	}
 }
 
+func TestStoreBuildsPageFTSInDisplayTreeOrder(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := NowMS()
+	if err := st.UpsertPage(ctx, Page{ID: "page1", Title: "Recipe", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	blocks := []Block{
+		{ID: "z-root", PageID: "page1", ParentID: "page1", Type: "text", Text: "third", DisplayOrder: 2, CreatedTime: now, Alive: true, Source: "test", SyncedAt: now},
+		{ID: "a-child", PageID: "page1", ParentID: "a-root", Type: "text", Text: "second", DisplayOrder: 1, CreatedTime: now, Alive: true, Source: "test", SyncedAt: now},
+		{ID: "a-root", PageID: "page1", ParentID: "page1", Type: "text", Text: "first", DisplayOrder: 1, CreatedTime: now, Alive: true, Source: "test", SyncedAt: now},
+	}
+	for _, block := range blocks {
+		if err := st.UpsertBlock(ctx, block); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var body string
+	if err := st.DB().QueryRowContext(ctx, `select body from page_fts where page_id = ?`, "page1").Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body != "first\nsecond\nthird" {
+		t.Fatalf("unexpected FTS body order: %q", body)
+	}
+}
+
 func TestStoreStatusAndOptimize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "notcrawl.db")
 	st, err := Open(path)

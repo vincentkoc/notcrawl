@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -437,29 +438,65 @@ func (s *Store) refreshPageFTS(ctx context.Context, pageID string) error {
 		}
 		return err
 	}
-	rows, err := s.db.QueryContext(ctx, `select text from blocks where page_id = ? and alive = 1 order by parent_id, display_order, created_time, id`, pageID)
+	blocks, err := s.PageBlocks(ctx, pageID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var parts []string
-	for rows.Next() {
-		var text sql.NullString
-		if err := rows.Scan(&text); err != nil {
-			return err
-		}
-		if text.Valid && strings.TrimSpace(text.String) != "" {
-			parts = append(parts, text.String)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
+	parts := pageBlockTextParts(pageID, blocks)
 	if _, err := s.db.ExecContext(ctx, `delete from page_fts where page_id = ?`, pageID); err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `insert into page_fts(page_id, title, body) values (?, ?, ?)`, pageID, title, strings.Join(parts, "\n"))
 	return err
+}
+
+func pageBlockTextParts(pageID string, blocks []Block) []string {
+	children := map[string][]Block{}
+	for _, block := range blocks {
+		if block.ID == pageID {
+			continue
+		}
+		children[block.ParentID] = append(children[block.ParentID], block)
+	}
+	for parent := range children {
+		sortBlockSiblings(children[parent])
+	}
+
+	var parts []string
+	var appendChildren func(string)
+	appendChildren = func(parentID string) {
+		for _, block := range children[parentID] {
+			if strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+			appendChildren(block.ID)
+		}
+	}
+	appendChildren(pageID)
+	if len(children[pageID]) == 0 {
+		for _, block := range blocks {
+			if block.ID == pageID || block.ParentID == pageID {
+				continue
+			}
+			if strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+	}
+	return parts
+}
+
+func sortBlockSiblings(blocks []Block) {
+	sort.SliceStable(blocks, func(i, j int) bool {
+		a, z := blocks[i], blocks[j]
+		if a.DisplayOrder != z.DisplayOrder {
+			return a.DisplayOrder < z.DisplayOrder
+		}
+		if a.CreatedTime == z.CreatedTime {
+			return a.ID < z.ID
+		}
+		return a.CreatedTime < z.CreatedTime
+	})
 }
 
 func (s *Store) Search(ctx context.Context, q string, limit int) ([]SearchResult, error) {
