@@ -66,6 +66,12 @@ autolabeler:
   - label: "feat"
     title:
       - '/^feat(\(.+\))?:/i'
+  - label: "feature"
+    title:
+      - '/^feature(\(.+\))?:/i'
+  - label: "enhancement"
+    title:
+      - '/^enhancement(\(.+\))?:/i'
   - label: "fix"
     title:
       - '/^fix(\(.+\))?:/i'
@@ -90,15 +96,21 @@ autolabeler:
   - label: "test"
     title:
       - '/^test(\(.+\))?:/i'
+  - label: "tests"
+    title:
+      - '/^tests(\(.+\))?:/i'
   - label: "chore"
     title:
       - '/^chore(\(.+\))?:/i'
+  - label: "dep"
+    title:
+      - '/^dep(\(.+\))?:/i'
+  - label: "deps"
+    title:
+      - '/^deps(\(.+\))?:/i'
   - label: "dependencies"
     title:
-      - '/^(dep|deps|dependencies)(\(.+\))?:/i'
-  - label: "other"
-    title:
-      - '/.*/'
+      - '/^dependencies(\(.+\))?:/i'
 
 template: |
   ## notcrawl v$RESOLVED_VERSION

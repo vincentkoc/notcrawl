@@ -8,7 +8,6 @@ Cloudsmith APT/RPM repositories.
 ```bash
 go test ./...
 go build ./cmd/notcrawl
-make release-notes TAG=v0.1.0
 ```
 
 If GoReleaser is installed:
@@ -22,13 +21,9 @@ under `dist/` without publishing.
 
 ## Release Notes
 
-Generate local notes from conventional commits:
-
-```bash
-scripts/release-notes.sh v0.1.0
-```
-
-GitHub also uses Release Drafter to label PRs and maintain draft release notes.
+GitHub uses Release Drafter to auto-label PRs and generate release notes from
+merged pull requests. The release workflow publishes the Release Drafter output
+for the pushed tag, then uploads the GoReleaser artifacts to that release.
 
 ## Tagged Release
 
@@ -42,9 +37,9 @@ git push origin v0.1.0
 The release workflow:
 
 1. runs tests
-2. generates release notes
-3. builds GoReleaser artifacts
-4. publishes GitHub release assets
+2. builds GoReleaser artifacts
+3. publishes Release Drafter notes for the tag
+4. uploads GitHub release assets
 5. optionally publishes APT/RPM packages to Cloudsmith
 6. updates the Homebrew tap
 
