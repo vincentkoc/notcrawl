@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Store) Pages(ctx context.Context) ([]Page, error) {
-	rows, err := s.db.QueryContext(ctx, `select id, space_id, parent_id, parent_table, collection_id, title, url, icon, cover,
+	rows, err := s.queryContext(ctx, `select id, space_id, parent_id, parent_table, collection_id, title, url, icon, cover,
 		properties_json, created_time, last_edited_time, alive, source, raw_json, synced_at
 		from pages where alive = 1 order by coalesce(last_edited_time, 0) desc, title`)
 	if err != nil {
@@ -29,7 +29,7 @@ func (s *Store) Pages(ctx context.Context) ([]Page, error) {
 }
 
 func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
-	rows, err := s.db.QueryContext(ctx, `select id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at
+	rows, err := s.queryContext(ctx, `select id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at
 		from collections order by lower(coalesce(name, id)), id`)
 	if err != nil {
 		return nil, err
@@ -48,13 +48,13 @@ func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
 
 func (s *Store) Collection(ctx context.Context, id string) (Collection, error) {
 	var c Collection
-	err := s.db.QueryRowContext(ctx, `select id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at
+	err := s.queryRowContext(ctx, `select id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at
 		from collections where id = ?`, id).Scan(&c.ID, &c.SpaceID, &c.ParentID, &c.ParentTable, &c.Name, &c.SchemaJSON, &c.FormatJSON, &c.RawJSON, &c.Source, &c.SyncedAt)
 	return c, err
 }
 
 func (s *Store) CollectionPages(ctx context.Context, collectionID string) ([]Page, error) {
-	rows, err := s.db.QueryContext(ctx, `select id, space_id, parent_id, parent_table, collection_id, title, url, icon, cover,
+	rows, err := s.queryContext(ctx, `select id, space_id, parent_id, parent_table, collection_id, title, url, icon, cover,
 		properties_json, created_time, last_edited_time, alive, source, raw_json, synced_at
 		from pages where collection_id = ? and alive = 1 order by coalesce(last_edited_time, 0) desc, title`, collectionID)
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *Store) CollectionPages(ctx context.Context, collectionID string) ([]Pag
 }
 
 func (s *Store) PageBlocks(ctx context.Context, pageID string) ([]Block, error) {
-	rows, err := s.db.QueryContext(ctx, `select id, page_id, space_id, parent_id, parent_table, type, text, properties_json,
+	rows, err := s.queryContext(ctx, `select id, page_id, space_id, parent_id, parent_table, type, text, properties_json,
 		content_json, format_json, display_order, created_time, last_edited_time, alive, source, raw_json, synced_at
 		from blocks where page_id = ? and alive = 1 order by parent_id, display_order, created_time, id`, pageID)
 	if err != nil {
@@ -98,7 +98,7 @@ func (s *Store) PageBlocks(ctx context.Context, pageID string) ([]Block, error) 
 }
 
 func (s *Store) PageComments(ctx context.Context, pageID string) ([]Comment, error) {
-	rows, err := s.db.QueryContext(ctx, `select id, page_id, space_id, parent_id, text, created_by_id,
+	rows, err := s.queryContext(ctx, `select id, page_id, space_id, parent_id, text, created_by_id,
 		created_time, last_edited_time, alive, raw_json, source, synced_at
 		from comments where page_id = ? and alive = 1 order by created_time, id`, pageID)
 	if err != nil {
@@ -124,7 +124,7 @@ func (s *Store) SpaceName(ctx context.Context, id string) (string, error) {
 		return "default", nil
 	}
 	var name sql.NullString
-	err := s.db.QueryRowContext(ctx, `select name from spaces where id = ?`, id).Scan(&name)
+	err := s.queryRowContext(ctx, `select name from spaces where id = ?`, id).Scan(&name)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "space-" + shortID(id), nil
@@ -142,7 +142,7 @@ func (s *Store) TeamName(ctx context.Context, id string) (string, error) {
 		return "", nil
 	}
 	var name sql.NullString
-	err := s.db.QueryRowContext(ctx, `select name from teams where id = ?`, id).Scan(&name)
+	err := s.queryRowContext(ctx, `select name from teams where id = ?`, id).Scan(&name)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "team-" + shortID(id), nil
@@ -174,7 +174,7 @@ func (s *Store) resolveTeamID(ctx context.Context, table, id, collectionID strin
 	switch table {
 	case "block":
 		var parentID, parentTable sql.NullString
-		err := s.db.QueryRowContext(ctx, `select parent_id, parent_table from blocks where id = ?`, id).Scan(&parentID, &parentTable)
+		err := s.queryRowContext(ctx, `select parent_id, parent_table from blocks where id = ?`, id).Scan(&parentID, &parentTable)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return "", nil
@@ -184,7 +184,7 @@ func (s *Store) resolveTeamID(ctx context.Context, table, id, collectionID strin
 		return s.resolveTeamID(ctx, parentTable.String, parentID.String, "", seen)
 	case "collection", "database", "data_source":
 		var parentID, parentTable sql.NullString
-		err := s.db.QueryRowContext(ctx, `select parent_id, parent_table from collections where id = ?`, id).Scan(&parentID, &parentTable)
+		err := s.queryRowContext(ctx, `select parent_id, parent_table from collections where id = ?`, id).Scan(&parentID, &parentTable)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return "", nil
