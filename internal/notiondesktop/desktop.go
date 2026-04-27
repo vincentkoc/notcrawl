@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 const SourceName = "desktop"
+const desktopSnapshotRetention = 2
 
 type Source struct {
 	Path      string
@@ -122,7 +124,63 @@ func snapshotDB(path, cacheDir string) (string, error) {
 			return "", err
 		}
 	}
+	if err := pruneDesktopSnapshots(cacheDir, desktopSnapshotRetention, outPath); err != nil {
+		return "", err
+	}
 	return outPath, nil
+}
+
+type desktopSnapshot struct {
+	path    string
+	modTime time.Time
+}
+
+func pruneDesktopSnapshots(cacheDir string, keep int, current string) error {
+	if keep < 1 {
+		keep = 1
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return err
+	}
+	var snapshots []desktopSnapshot
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, "notion-desktop-") || !strings.HasSuffix(name, ".db") {
+			continue
+		}
+		path := filepath.Join(cacheDir, name)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		snapshots = append(snapshots, desktopSnapshot{path: path, modTime: info.ModTime()})
+	}
+	sort.SliceStable(snapshots, func(i, j int) bool {
+		if snapshots[i].modTime.Equal(snapshots[j].modTime) {
+			return snapshots[i].path > snapshots[j].path
+		}
+		return snapshots[i].modTime.After(snapshots[j].modTime)
+	})
+	keepPaths := map[string]bool{}
+	if current != "" {
+		keepPaths[filepath.Clean(current)] = true
+	}
+	for i := 0; i < len(snapshots) && len(keepPaths) < keep; i++ {
+		keepPaths[filepath.Clean(snapshots[i].path)] = true
+	}
+	for _, snapshot := range snapshots {
+		path := filepath.Clean(snapshot.path)
+		if keepPaths[path] {
+			continue
+		}
+		for _, target := range []string{path, path + "-wal", path + "-shm"} {
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func copyFile(src, dst string, perm os.FileMode) error {
