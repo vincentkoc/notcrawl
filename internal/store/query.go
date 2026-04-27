@@ -76,8 +76,8 @@ func (s *Store) CollectionPages(ctx context.Context, collectionID string) ([]Pag
 
 func (s *Store) PageBlocks(ctx context.Context, pageID string) ([]Block, error) {
 	rows, err := s.db.QueryContext(ctx, `select id, page_id, space_id, parent_id, parent_table, type, text, properties_json,
-		content_json, format_json, created_time, last_edited_time, alive, source, raw_json, synced_at
-		from blocks where page_id = ? and alive = 1 order by created_time, id`, pageID)
+		content_json, format_json, display_order, created_time, last_edited_time, alive, source, raw_json, synced_at
+		from blocks where page_id = ? and alive = 1 order by parent_id, display_order, created_time, id`, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s *Store) PageBlocks(ctx context.Context, pageID string) ([]Block, error) 
 		var b Block
 		var alive int
 		if err := rows.Scan(&b.ID, &b.PageID, &b.SpaceID, &b.ParentID, &b.ParentTable, &b.Type, &b.Text, &b.PropertiesJSON,
-			&b.ContentJSON, &b.FormatJSON, &b.CreatedTime, &b.LastEditedTime, &alive, &b.Source, &b.RawJSON, &b.SyncedAt); err != nil {
+			&b.ContentJSON, &b.FormatJSON, &b.DisplayOrder, &b.CreatedTime, &b.LastEditedTime, &alive, &b.Source, &b.RawJSON, &b.SyncedAt); err != nil {
 			return nil, err
 		}
 		b.Alive = IntBool(alive)

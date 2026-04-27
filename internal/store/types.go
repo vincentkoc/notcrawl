@@ -47,6 +47,7 @@ type Block struct {
 	PropertiesJSON string
 	ContentJSON    string
 	FormatJSON     string
+	DisplayOrder   int64
 	CreatedTime    int64
 	LastEditedTime int64
 	Alive          bool

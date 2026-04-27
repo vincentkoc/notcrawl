@@ -44,3 +44,37 @@ func TestExporterWritesMarkdown(t *testing.T) {
 		t.Fatalf("unexpected markdown:\n%s", text)
 	}
 }
+
+func TestExporterUsesDisplayOrder(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := store.NowMS()
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", Title: "Recipe", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, block := range []store.Block{
+		{ID: "salt", PageID: "page1", ParentID: "page1", Type: "bulleted_list", Text: "salt", DisplayOrder: 2, CreatedTime: now, Alive: true, Source: "test", SyncedAt: now},
+		{ID: "flour", PageID: "page1", ParentID: "page1", Type: "bulleted_list", Text: "flour", DisplayOrder: 1, CreatedTime: now, Alive: true, Source: "test", SyncedAt: now},
+	} {
+		if err := st.UpsertBlock(ctx, block); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	s, err := Exporter{Store: st, Dir: dir}.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(s.Files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if strings.Index(text, "- flour") > strings.Index(text, "- salt") {
+		t.Fatalf("markdown did not preserve display order:\n%s", text)
+	}
+}

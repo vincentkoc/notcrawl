@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -173,6 +174,7 @@ func (s *Store) init(ctx context.Context) error {
 			properties_json text,
 			content_json text,
 			format_json text,
+			display_order integer not null default 0,
 			created_time integer,
 			last_edited_time integer,
 			alive integer not null,
@@ -181,7 +183,6 @@ func (s *Store) init(ctx context.Context) error {
 			synced_at integer not null
 		)`,
 		`create index if not exists blocks_page_id on blocks(page_id)`,
-		`create index if not exists blocks_page_alive_created on blocks(page_id, alive, created_time, id)`,
 		`create index if not exists blocks_parent_id on blocks(parent_id)`,
 		`create table if not exists collections (
 			id text primary key,
@@ -249,10 +250,45 @@ func (s *Store) init(ctx context.Context) error {
 	if current > schemaVersion {
 		return fmt.Errorf("database schema version %d is newer than this notcrawl build supports (%d)", current, schemaVersion)
 	}
+	if err := s.ensureColumn(ctx, "blocks", "display_order", "integer not null default 0"); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `create index if not exists blocks_page_alive_order on blocks(page_id, alive, parent_id, display_order, created_time, id)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `create index if not exists blocks_page_alive_created on blocks(page_id, alive, created_time, id)`); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `insert or replace into meta(key, value) values('schema_version', ?)`, schemaVersion); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `pragma table_info(`+table+`)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `alter table `+table+` add column `+column+` `+definition)
+	return err
 }
 
 func NowMS() int64 {
@@ -318,8 +354,8 @@ func (s *Store) UpsertPage(ctx context.Context, x Page) error {
 func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 	_, err := s.db.ExecContext(ctx, `insert into blocks(
 		id, page_id, space_id, parent_id, parent_table, type, text, properties_json, content_json, format_json,
-		created_time, last_edited_time, alive, source, raw_json, synced_at)
-		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		display_order, created_time, last_edited_time, alive, source, raw_json, synced_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		on conflict(id) do update set
 			page_id=excluded.page_id,
 			space_id=excluded.space_id,
@@ -330,6 +366,7 @@ func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 			properties_json=excluded.properties_json,
 			content_json=excluded.content_json,
 			format_json=excluded.format_json,
+			display_order=excluded.display_order,
 			created_time=excluded.created_time,
 			last_edited_time=excluded.last_edited_time,
 			alive=excluded.alive,
@@ -337,7 +374,7 @@ func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 			raw_json=excluded.raw_json,
 			synced_at=excluded.synced_at`,
 		x.ID, x.PageID, x.SpaceID, x.ParentID, x.ParentTable, x.Type, x.Text, x.PropertiesJSON, x.ContentJSON, x.FormatJSON,
-		x.CreatedTime, x.LastEditedTime, BoolInt(x.Alive), x.Source, x.RawJSON, x.SyncedAt)
+		x.DisplayOrder, x.CreatedTime, x.LastEditedTime, BoolInt(x.Alive), x.Source, x.RawJSON, x.SyncedAt)
 	if err != nil {
 		return err
 	}
@@ -401,29 +438,65 @@ func (s *Store) refreshPageFTS(ctx context.Context, pageID string) error {
 		}
 		return err
 	}
-	rows, err := s.db.QueryContext(ctx, `select text from blocks where page_id = ? and alive = 1 order by created_time, id`, pageID)
+	blocks, err := s.PageBlocks(ctx, pageID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var parts []string
-	for rows.Next() {
-		var text sql.NullString
-		if err := rows.Scan(&text); err != nil {
-			return err
-		}
-		if text.Valid && strings.TrimSpace(text.String) != "" {
-			parts = append(parts, text.String)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
+	parts := pageBlockTextParts(pageID, blocks)
 	if _, err := s.db.ExecContext(ctx, `delete from page_fts where page_id = ?`, pageID); err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `insert into page_fts(page_id, title, body) values (?, ?, ?)`, pageID, title, strings.Join(parts, "\n"))
 	return err
+}
+
+func pageBlockTextParts(pageID string, blocks []Block) []string {
+	children := map[string][]Block{}
+	for _, block := range blocks {
+		if block.ID == pageID {
+			continue
+		}
+		children[block.ParentID] = append(children[block.ParentID], block)
+	}
+	for parent := range children {
+		sortBlockSiblings(children[parent])
+	}
+
+	var parts []string
+	var appendChildren func(string)
+	appendChildren = func(parentID string) {
+		for _, block := range children[parentID] {
+			if strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+			appendChildren(block.ID)
+		}
+	}
+	appendChildren(pageID)
+	if len(children[pageID]) == 0 {
+		for _, block := range blocks {
+			if block.ID == pageID || block.ParentID == pageID {
+				continue
+			}
+			if strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+	}
+	return parts
+}
+
+func sortBlockSiblings(blocks []Block) {
+	sort.SliceStable(blocks, func(i, j int) bool {
+		a, z := blocks[i], blocks[j]
+		if a.DisplayOrder != z.DisplayOrder {
+			return a.DisplayOrder < z.DisplayOrder
+		}
+		if a.CreatedTime == z.CreatedTime {
+			return a.ID < z.ID
+		}
+		return a.CreatedTime < z.CreatedTime
+	})
 }
 
 func (s *Store) Search(ctx context.Context, q string, limit int) ([]SearchResult, error) {
