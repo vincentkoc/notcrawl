@@ -47,45 +47,50 @@ func (c Client) Sync(ctx context.Context, st *store.Store) (Summary, error) {
 		c.HTTP = http.DefaultClient
 	}
 	var s Summary
-	users, err := c.listUsers(ctx)
-	if err != nil {
-		return s, err
-	}
-	for _, u := range users {
-		raw := notiontext.MarshalRaw(u)
-		if err := st.UpsertUser(ctx, store.User{
-			ID: u.string("id"), Name: userName(u), Email: userEmail(u), RawJSON: raw, Source: SourceName, SyncedAt: store.NowMS(),
-		}); err != nil {
-			return s, err
-		}
-		s.Users++
-	}
-	pages, err := c.searchPages(ctx)
-	if err != nil {
-		return s, err
-	}
-	for _, page := range pages {
-		count, comments, err := c.ingestPage(ctx, st, page, ingestPageOptions{FetchBlocks: true, FetchComments: true})
+	if err := st.DeferPageFTS(ctx, func() error {
+		users, err := c.listUsers(ctx)
 		if err != nil {
-			return s, err
+			return err
 		}
-		s.Pages++
-		s.Blocks += count
-		s.Comments += comments
-	}
-	collections, err := c.searchCollections(ctx)
-	if err != nil {
-		return s, err
-	}
-	for _, collection := range collections {
-		rows, err := c.ingestCollection(ctx, st, collection)
+		for _, u := range users {
+			raw := notiontext.MarshalRaw(u)
+			if err := st.UpsertUser(ctx, store.User{
+				ID: u.string("id"), Name: userName(u), Email: userEmail(u), RawJSON: raw, Source: SourceName, SyncedAt: store.NowMS(),
+			}); err != nil {
+				return err
+			}
+			s.Users++
+		}
+		pages, err := c.searchPages(ctx)
 		if err != nil {
-			return s, err
+			return err
 		}
-		s.Databases++
-		s.DatabaseRows += rows
-	}
-	if err := st.SetSyncState(ctx, SourceName, "workspace", "default", time.Now().Format(time.RFC3339)); err != nil {
+		for _, page := range pages {
+			count, comments, err := c.ingestPage(ctx, st, page, ingestPageOptions{FetchBlocks: true, FetchComments: true})
+			if err != nil {
+				return err
+			}
+			s.Pages++
+			s.Blocks += count
+			s.Comments += comments
+		}
+		collections, err := c.searchCollections(ctx)
+		if err != nil {
+			return err
+		}
+		for _, collection := range collections {
+			rows, err := c.ingestCollection(ctx, st, collection)
+			if err != nil {
+				return err
+			}
+			s.Databases++
+			s.DatabaseRows += rows
+		}
+		if err := st.SetSyncState(ctx, SourceName, "workspace", "default", time.Now().Format(time.RFC3339)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return s, err
 	}
 	return s, nil

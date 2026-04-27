@@ -33,6 +33,42 @@ func TestStoreUpsertsAndSearchesPage(t *testing.T) {
 	}
 }
 
+func TestStoreDefersPageFTSRefresh(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := NowMS()
+	err = st.DeferPageFTS(ctx, func() error {
+		if err := st.UpsertPage(ctx, Page{ID: "page1", Title: "Launch Plan", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+			return err
+		}
+		if err := st.UpsertBlock(ctx, Block{ID: "block1", PageID: "page1", Type: "text", Text: "deferred sqlite refresh", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+			return err
+		}
+		results, err := st.Search(ctx, "sqlite", 10)
+		if err != nil {
+			return err
+		}
+		if len(results) != 0 {
+			t.Fatalf("expected deferred FTS to stay stale inside callback, got %+v", results)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := st.Search(ctx, "sqlite", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ID != "page1" {
+		t.Fatalf("expected refreshed FTS after callback, got %+v", results)
+	}
+}
+
 func TestStoreOrdersBlocksByDisplayOrder(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
 	if err != nil {

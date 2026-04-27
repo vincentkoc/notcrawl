@@ -17,8 +17,10 @@ import (
 const schemaVersion = 1
 
 type Store struct {
-	db   *sql.DB
-	path string
+	db               *sql.DB
+	path             string
+	deferredFTS      int
+	deferredFTSPages map[string]bool
 }
 
 func Open(path string) (*Store, error) {
@@ -379,7 +381,7 @@ func (s *Store) UpsertPage(ctx context.Context, x Page) error {
 	if err != nil {
 		return err
 	}
-	return s.refreshPageFTS(ctx, x.ID)
+	return s.markPageFTS(ctx, x.ID)
 }
 
 func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
@@ -410,7 +412,7 @@ func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 		return err
 	}
 	if x.PageID != "" {
-		return s.refreshPageFTS(ctx, x.PageID)
+		return s.markPageFTS(ctx, x.PageID)
 	}
 	return nil
 }
@@ -459,6 +461,44 @@ func (s *Store) SetSyncState(ctx context.Context, source, entityType, entityID, 
 		on conflict(source, entity_type, entity_id) do update set cursor=excluded.cursor, synced_at=excluded.synced_at`,
 		source, entityType, entityID, cursor, NowMS())
 	return err
+}
+
+func (s *Store) DeferPageFTS(ctx context.Context, fn func() error) error {
+	outer := s.deferredFTS == 0
+	if outer {
+		s.deferredFTSPages = map[string]bool{}
+	}
+	s.deferredFTS++
+	err := fn()
+	s.deferredFTS--
+	if !outer {
+		return err
+	}
+	pages := s.deferredFTSPages
+	s.deferredFTSPages = nil
+	if err != nil {
+		return err
+	}
+	for pageID := range pages {
+		if err := s.refreshPageFTS(ctx, pageID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) markPageFTS(ctx context.Context, pageID string) error {
+	if pageID == "" {
+		return nil
+	}
+	if s.deferredFTS > 0 {
+		if s.deferredFTSPages == nil {
+			s.deferredFTSPages = map[string]bool{}
+		}
+		s.deferredFTSPages[pageID] = true
+		return nil
+	}
+	return s.refreshPageFTS(ctx, pageID)
 }
 
 func (s *Store) refreshPageFTS(ctx context.Context, pageID string) error {

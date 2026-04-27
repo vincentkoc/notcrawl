@@ -63,22 +63,27 @@ func Ingest(ctx context.Context, st *store.Store, path, cacheDir string) (Summar
 	}
 	defer db.Close()
 	s := Summary{Source: source}
-	if s.Spaces, err = ingestSpaces(ctx, st, db); err != nil {
-		return s, err
-	}
-	if s.Users, err = ingestUsers(ctx, st, db); err != nil {
-		return s, err
-	}
-	if s.Teams, err = ingestTeams(ctx, st, db); err != nil {
-		return s, err
-	}
-	if s.Collections, err = ingestCollections(ctx, st, db); err != nil {
-		return s, err
-	}
-	if s.Pages, s.Blocks, s.RawRecords, err = ingestBlocks(ctx, st, db); err != nil {
-		return s, err
-	}
-	if s.Comments, err = ingestComments(ctx, st, db); err != nil {
+	if err := st.DeferPageFTS(ctx, func() error {
+		if s.Spaces, err = ingestSpaces(ctx, st, db); err != nil {
+			return err
+		}
+		if s.Users, err = ingestUsers(ctx, st, db); err != nil {
+			return err
+		}
+		if s.Teams, err = ingestTeams(ctx, st, db); err != nil {
+			return err
+		}
+		if s.Collections, err = ingestCollections(ctx, st, db); err != nil {
+			return err
+		}
+		if s.Pages, s.Blocks, s.RawRecords, err = ingestBlocks(ctx, st, db); err != nil {
+			return err
+		}
+		if s.Comments, err = ingestComments(ctx, st, db); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return s, err
 	}
 	if err := st.SetSyncState(ctx, SourceName, "desktop", "notion.db", snapshot); err != nil {
