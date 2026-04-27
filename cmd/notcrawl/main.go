@@ -206,7 +206,7 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Collections, s.Comments, s.Source.Snapshot)
+		fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d teams=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Teams, s.Collections, s.Comments, s.Source.Snapshot)
 	case "api":
 		s, err := notionapi.Client{
 			BaseURL: cfg.Notion.API.BaseURL,
@@ -223,7 +223,7 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Collections, s.Comments, s.Source.Snapshot)
+			fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d teams=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Teams, s.Collections, s.Comments, s.Source.Snapshot)
 		}
 		if cfg.Notion.API.Enabled && cfg.APIToken() != "" {
 			s, err := notionapi.Client{

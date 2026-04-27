@@ -249,15 +249,16 @@ func (c Client) ingestCollection(ctx context.Context, st *store.Store, collectio
 		name = id
 	}
 	if err := st.UpsertCollection(ctx, store.Collection{
-		ID:         id,
-		SpaceID:    parent.string("workspace"),
-		ParentID:   parentID,
-		Name:       name,
-		SchemaJSON: marshalAny(collection["properties"]),
-		FormatJSON: marshalAny(collection),
-		RawJSON:    raw,
-		Source:     SourceName,
-		SyncedAt:   store.NowMS(),
+		ID:          id,
+		SpaceID:     parent.string("workspace"),
+		ParentID:    parentID,
+		ParentTable: parent.string("type"),
+		Name:        name,
+		SchemaJSON:  marshalAny(collection["properties"]),
+		FormatJSON:  marshalAny(collection),
+		RawJSON:     raw,
+		Source:      SourceName,
+		SyncedAt:    store.NowMS(),
 	}); err != nil {
 		return 0, err
 	}

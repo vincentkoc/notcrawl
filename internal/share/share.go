@@ -21,6 +21,7 @@ import (
 var exportTables = []string{
 	"spaces",
 	"users",
+	"teams",
 	"pages",
 	"blocks",
 	"collections",

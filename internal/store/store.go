@@ -99,6 +99,7 @@ type Status struct {
 	WALBytes    int64  `json:"wal_bytes"`
 	Spaces      int    `json:"spaces"`
 	Users       int    `json:"users"`
+	Teams       int    `json:"teams"`
 	Pages       int    `json:"pages"`
 	Blocks      int    `json:"blocks"`
 	Collections int    `json:"collections"`
@@ -141,6 +142,17 @@ func (s *Store) init(ctx context.Context) error {
 			source text not null,
 			synced_at integer not null
 		)`,
+		`create table if not exists teams (
+			id text primary key,
+			space_id text,
+			parent_id text,
+			parent_table text,
+			name text not null,
+			raw_json text,
+			source text not null,
+			synced_at integer not null
+		)`,
+		`create index if not exists teams_space_id on teams(space_id)`,
 		`create table if not exists pages (
 			id text primary key,
 			space_id text,
@@ -188,6 +200,7 @@ func (s *Store) init(ctx context.Context) error {
 			id text primary key,
 			space_id text,
 			parent_id text,
+			parent_table text,
 			name text,
 			schema_json text,
 			format_json text,
@@ -251,6 +264,9 @@ func (s *Store) init(ctx context.Context) error {
 		return fmt.Errorf("database schema version %d is newer than this notcrawl build supports (%d)", current, schemaVersion)
 	}
 	if err := s.ensureColumn(ctx, "blocks", "display_order", "integer not null default 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "collections", "parent_table", "text"); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `create index if not exists blocks_page_alive_order on blocks(page_id, alive, parent_id, display_order, created_time, id)`); err != nil {
@@ -322,6 +338,21 @@ func (s *Store) UpsertUser(ctx context.Context, x User) error {
 	return err
 }
 
+func (s *Store) UpsertTeam(ctx context.Context, x Team) error {
+	_, err := s.db.ExecContext(ctx, `insert into teams(id, space_id, parent_id, parent_table, name, raw_json, source, synced_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?)
+		on conflict(id) do update set
+			space_id=excluded.space_id,
+			parent_id=excluded.parent_id,
+			parent_table=excluded.parent_table,
+			name=excluded.name,
+			raw_json=excluded.raw_json,
+			source=excluded.source,
+			synced_at=excluded.synced_at`,
+		x.ID, x.SpaceID, x.ParentID, x.ParentTable, x.Name, x.RawJSON, x.Source, x.SyncedAt)
+	return err
+}
+
 func (s *Store) UpsertPage(ctx context.Context, x Page) error {
 	_, err := s.db.ExecContext(ctx, `insert into pages(
 		id, space_id, parent_id, parent_table, collection_id, title, url, icon, cover, properties_json,
@@ -385,12 +416,12 @@ func (s *Store) UpsertBlock(ctx context.Context, x Block) error {
 }
 
 func (s *Store) UpsertCollection(ctx context.Context, x Collection) error {
-	_, err := s.db.ExecContext(ctx, `insert into collections(id, space_id, parent_id, name, schema_json, format_json, raw_json, source, synced_at)
-		values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		on conflict(id) do update set space_id=excluded.space_id, parent_id=excluded.parent_id, name=excluded.name,
+	_, err := s.db.ExecContext(ctx, `insert into collections(id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at)
+		values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		on conflict(id) do update set space_id=excluded.space_id, parent_id=excluded.parent_id, parent_table=excluded.parent_table, name=excluded.name,
 			schema_json=excluded.schema_json, format_json=excluded.format_json, raw_json=excluded.raw_json,
 			source=excluded.source, synced_at=excluded.synced_at`,
-		x.ID, x.SpaceID, x.ParentID, x.Name, x.SchemaJSON, x.FormatJSON, x.RawJSON, x.Source, x.SyncedAt)
+		x.ID, x.SpaceID, x.ParentID, x.ParentTable, x.Name, x.SchemaJSON, x.FormatJSON, x.RawJSON, x.Source, x.SyncedAt)
 	return err
 }
 
@@ -560,6 +591,7 @@ func (s *Store) Status(ctx context.Context) (Status, error) {
 	}{
 		{`select count(*) from spaces`, &status.Spaces},
 		{`select count(*) from users`, &status.Users},
+		{`select count(*) from teams`, &status.Teams},
 		{`select count(*) from pages`, &status.Pages},
 		{`select count(*) from blocks`, &status.Blocks},
 		{`select count(*) from collections`, &status.Collections},

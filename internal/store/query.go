@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 func (s *Store) Pages(ctx context.Context) ([]Page, error) {
@@ -28,7 +29,7 @@ func (s *Store) Pages(ctx context.Context) ([]Page, error) {
 }
 
 func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
-	rows, err := s.db.QueryContext(ctx, `select id, space_id, parent_id, name, schema_json, format_json, raw_json, source, synced_at
+	rows, err := s.db.QueryContext(ctx, `select id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at
 		from collections order by lower(coalesce(name, id)), id`)
 	if err != nil {
 		return nil, err
@@ -37,7 +38,7 @@ func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
 	var collections []Collection
 	for rows.Next() {
 		var c Collection
-		if err := rows.Scan(&c.ID, &c.SpaceID, &c.ParentID, &c.Name, &c.SchemaJSON, &c.FormatJSON, &c.RawJSON, &c.Source, &c.SyncedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.SpaceID, &c.ParentID, &c.ParentTable, &c.Name, &c.SchemaJSON, &c.FormatJSON, &c.RawJSON, &c.Source, &c.SyncedAt); err != nil {
 			return nil, err
 		}
 		collections = append(collections, c)
@@ -47,8 +48,8 @@ func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
 
 func (s *Store) Collection(ctx context.Context, id string) (Collection, error) {
 	var c Collection
-	err := s.db.QueryRowContext(ctx, `select id, space_id, parent_id, name, schema_json, format_json, raw_json, source, synced_at
-		from collections where id = ?`, id).Scan(&c.ID, &c.SpaceID, &c.ParentID, &c.Name, &c.SchemaJSON, &c.FormatJSON, &c.RawJSON, &c.Source, &c.SyncedAt)
+	err := s.db.QueryRowContext(ctx, `select id, space_id, parent_id, parent_table, name, schema_json, format_json, raw_json, source, synced_at
+		from collections where id = ?`, id).Scan(&c.ID, &c.SpaceID, &c.ParentID, &c.ParentTable, &c.Name, &c.SchemaJSON, &c.FormatJSON, &c.RawJSON, &c.Source, &c.SyncedAt)
 	return c, err
 }
 
@@ -126,12 +127,83 @@ func (s *Store) SpaceName(ctx context.Context, id string) (string, error) {
 	err := s.db.QueryRowContext(ctx, `select name from spaces where id = ?`, id).Scan(&name)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return id, nil
+			return "space-" + shortID(id), nil
 		}
 		return "", err
 	}
 	if name.Valid && name.String != "" {
 		return name.String, nil
 	}
-	return id, nil
+	return "space-" + shortID(id), nil
+}
+
+func (s *Store) TeamName(ctx context.Context, id string) (string, error) {
+	if id == "" {
+		return "", nil
+	}
+	var name sql.NullString
+	err := s.db.QueryRowContext(ctx, `select name from teams where id = ?`, id).Scan(&name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "team-" + shortID(id), nil
+		}
+		return "", err
+	}
+	if name.Valid && name.String != "" {
+		return name.String, nil
+	}
+	return "team-" + shortID(id), nil
+}
+
+func (s *Store) PageTeamID(ctx context.Context, page Page) (string, error) {
+	seen := map[string]bool{page.ID: true}
+	return s.resolveTeamID(ctx, page.ParentTable, page.ParentID, page.CollectionID, seen)
+}
+
+func (s *Store) resolveTeamID(ctx context.Context, table, id, collectionID string, seen map[string]bool) (string, error) {
+	if table == "team" {
+		return id, nil
+	}
+	if table == "collection" && id == "" {
+		id = collectionID
+	}
+	if id == "" || seen[table+":"+id] {
+		return "", nil
+	}
+	seen[table+":"+id] = true
+	switch table {
+	case "block":
+		var parentID, parentTable sql.NullString
+		err := s.db.QueryRowContext(ctx, `select parent_id, parent_table from blocks where id = ?`, id).Scan(&parentID, &parentTable)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return "", nil
+			}
+			return "", err
+		}
+		return s.resolveTeamID(ctx, parentTable.String, parentID.String, "", seen)
+	case "collection", "database", "data_source":
+		var parentID, parentTable sql.NullString
+		err := s.db.QueryRowContext(ctx, `select parent_id, parent_table from collections where id = ?`, id).Scan(&parentID, &parentTable)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return "", nil
+			}
+			return "", err
+		}
+		return s.resolveTeamID(ctx, parentTable.String, parentID.String, "", seen)
+	default:
+		return "", nil
+	}
+}
+
+func shortID(id string) string {
+	clean := strings.ReplaceAll(id, "-", "")
+	if len(clean) > 16 {
+		return clean[:8] + "-" + clean[len(clean)-8:]
+	}
+	if clean == "" {
+		return "unknown"
+	}
+	return clean
 }

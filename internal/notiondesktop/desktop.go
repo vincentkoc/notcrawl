@@ -28,6 +28,7 @@ type Summary struct {
 	Source      Source
 	Spaces      int
 	Users       int
+	Teams       int
 	Pages       int
 	Blocks      int
 	Collections int
@@ -66,6 +67,9 @@ func Ingest(ctx context.Context, st *store.Store, path, cacheDir string) (Summar
 		return s, err
 	}
 	if s.Users, err = ingestUsers(ctx, st, db); err != nil {
+		return s, err
+	}
+	if s.Teams, err = ingestTeams(ctx, st, db); err != nil {
 		return s, err
 	}
 	if s.Collections, err = ingestCollections(ctx, st, db); err != nil {
@@ -176,9 +180,38 @@ func ingestUsers(ctx context.Context, st *store.Store, db *sql.DB) (int, error) 
 	return n, rows.Err()
 }
 
+func ingestTeams(ctx context.Context, st *store.Store, db *sql.DB) (int, error) {
+	rows, err := db.QueryContext(ctx, `select id, space_id, parent_id, parent_table, coalesce(name, ''),
+		coalesce(json_object('id', id, 'space_id', space_id, 'parent_id', parent_id, 'parent_table', parent_table,
+			'name', name, 'description', description, 'team_pages', team_pages, 'settings', settings), '{}')
+		from team where coalesce(archived_at, 0) = 0`)
+	if err != nil {
+		return 0, ignoreMissingTable(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var x store.Team
+		if err := rows.Scan(&x.ID, &x.SpaceID, &x.ParentID, &x.ParentTable, &x.Name, &x.RawJSON); err != nil {
+			return n, err
+		}
+		if x.Name == "" {
+			x.Name = x.ID
+		}
+		x.Source = SourceName
+		x.SyncedAt = store.NowMS()
+		if err := st.UpsertTeam(ctx, x); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, rows.Err()
+}
+
 func ingestCollections(ctx context.Context, st *store.Store, db *sql.DB) (int, error) {
-	rows, err := db.QueryContext(ctx, `select id, space_id, parent_id, coalesce(name, ''), coalesce(schema, ''), coalesce(format, ''),
-		coalesce(json_object('id', id, 'space_id', space_id, 'parent_id', parent_id, 'name', name, 'schema', schema, 'format', format), '{}')
+	rows, err := db.QueryContext(ctx, `select id, space_id, parent_id, parent_table, coalesce(name, ''), coalesce(schema, ''), coalesce(format, ''),
+		coalesce(json_object('id', id, 'space_id', space_id, 'parent_id', parent_id, 'parent_table', parent_table,
+			'name', name, 'schema', schema, 'format', format), '{}')
 		from collection where alive = 1`)
 	if err != nil {
 		return 0, ignoreMissingTable(err)
@@ -187,7 +220,7 @@ func ingestCollections(ctx context.Context, st *store.Store, db *sql.DB) (int, e
 	n := 0
 	for rows.Next() {
 		var x store.Collection
-		if err := rows.Scan(&x.ID, &x.SpaceID, &x.ParentID, &x.Name, &x.SchemaJSON, &x.FormatJSON, &x.RawJSON); err != nil {
+		if err := rows.Scan(&x.ID, &x.SpaceID, &x.ParentID, &x.ParentTable, &x.Name, &x.SchemaJSON, &x.FormatJSON, &x.RawJSON); err != nil {
 			return n, err
 		}
 		x.Name = notiontext.TitleFromProperties(x.Name)

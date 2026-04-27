@@ -17,6 +17,17 @@ type User struct {
 	SyncedAt int64
 }
 
+type Team struct {
+	ID          string
+	SpaceID     string
+	ParentID    string
+	ParentTable string
+	Name        string
+	RawJSON     string
+	Source      string
+	SyncedAt    int64
+}
+
 type Page struct {
 	ID             string
 	SpaceID        string
@@ -57,15 +68,16 @@ type Block struct {
 }
 
 type Collection struct {
-	ID         string
-	SpaceID    string
-	ParentID   string
-	Name       string
-	SchemaJSON string
-	FormatJSON string
-	RawJSON    string
-	Source     string
-	SyncedAt   int64
+	ID          string
+	SpaceID     string
+	ParentID    string
+	ParentTable string
+	Name        string
+	SchemaJSON  string
+	FormatJSON  string
+	RawJSON     string
+	Source      string
+	SyncedAt    int64
 }
 
 type Comment struct {

@@ -105,6 +105,67 @@ func TestExporterPreservesUnicodePathNames(t *testing.T) {
 	}
 }
 
+func TestExporterUsesWorkspaceAndTeamspacePath(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := store.NowMS()
+	if err := st.UpsertSpace(ctx, store.Space{ID: "space1", Name: "Acme Org", Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertTeam(ctx, store.Team{ID: "team1", SpaceID: "space1", Name: "Research Lab", Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", SpaceID: "space1", ParentID: "team1", ParentTable: "team", Title: "Plan", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	s, err := Exporter{Store: st, Dir: dir}.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "acme-org", "research-lab", "plan-page1.md")
+	if len(s.Files) != 1 || s.Files[0] != want {
+		t.Fatalf("unexpected export path: %+v, want %s", s.Files, want)
+	}
+	b, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, `team_id: "team1"`) || !strings.Contains(text, `team: "Research Lab"`) {
+		t.Fatalf("missing team front matter:\n%s", text)
+	}
+}
+
+func TestExporterUsesReadableMissingSpaceFallback(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := store.NowMS()
+	spaceID := "52f1c029-ec85-4ff5-bd43-c6d6ea9259e0"
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", SpaceID: spaceID, Title: "Loose", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	s, err := Exporter{Store: st, Dir: dir}.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "space-52f1c029-ea9259e0", "loose-page1.md")
+	if len(s.Files) != 1 || s.Files[0] != want {
+		t.Fatalf("unexpected export path: %+v, want %s", s.Files, want)
+	}
+}
+
 func TestExporterPrunesStaleMarkdown(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))

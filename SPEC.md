@@ -91,6 +91,7 @@ Core tables:
 
 - `spaces`
 - `users`
+- `teams`
 - `pages`
 - `blocks`
 - `collections`
@@ -109,8 +110,10 @@ readable letters, numbers, CJK text, and emoji while replacing filesystem path
 separators and unsafe punctuation with dashes:
 
 ```text
-pages/<space-slug>/<page-title>-<short-id>.md
+pages/<space-slug>/<team-slug>/<page-title>-<short-id>.md
 ```
+
+The team slug is omitted when no teamspace can be resolved.
 
 Each export removes stale generated `.md` files under the Markdown root while
 leaving non-Markdown sidecar files alone.

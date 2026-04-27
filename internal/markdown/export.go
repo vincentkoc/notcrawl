@@ -61,6 +61,14 @@ func (e Exporter) writePage(ctx context.Context, page store.Page) (string, error
 	if err != nil {
 		return "", err
 	}
+	teamID, err := e.Store.PageTeamID(ctx, page)
+	if err != nil {
+		return "", err
+	}
+	teamName, err := e.Store.TeamName(ctx, teamID)
+	if err != nil {
+		return "", err
+	}
 	blocks, err := e.Store.PageBlocks(ctx, page.ID)
 	if err != nil {
 		return "", err
@@ -72,12 +80,17 @@ func (e Exporter) writePage(ctx context.Context, page store.Page) (string, error
 	spaceSlug := notiontext.Slug(spaceName)
 	titleSlug := maxSlug(notiontext.Slug(page.Title), 96)
 	name := fmt.Sprintf("%s-%s.md", titleSlug, notiontext.ShortID(page.ID))
-	path := filepath.Join(e.Dir, spaceSlug, name)
+	parts := []string{e.Dir, spaceSlug}
+	if teamName != "" {
+		parts = append(parts, notiontext.Slug(teamName))
+	}
+	parts = append(parts, name)
+	path := filepath.Join(parts...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	writeFrontMatter(&b, page, spaceName)
+	writeFrontMatter(&b, page, spaceName, teamID, teamName)
 	if page.Title != "" {
 		fmt.Fprintf(&b, "# %s\n\n", notiontext.MarkdownEscape(page.Title))
 	}
@@ -99,11 +112,13 @@ func (e Exporter) writePage(ctx context.Context, page store.Page) (string, error
 	return path, os.WriteFile(path, []byte(out), 0o644)
 }
 
-func writeFrontMatter(b *strings.Builder, page store.Page, spaceName string) {
+func writeFrontMatter(b *strings.Builder, page store.Page, spaceName, teamID, teamName string) {
 	b.WriteString("---\n")
 	writeKV(b, "id", page.ID)
 	writeKV(b, "space_id", page.SpaceID)
 	writeKV(b, "space", spaceName)
+	writeKV(b, "team_id", teamID)
+	writeKV(b, "team", teamName)
 	writeKV(b, "title", page.Title)
 	writeKV(b, "source", page.Source)
 	writeKV(b, "notion_url", page.URL)
