@@ -327,9 +327,13 @@ func runSearch(ctx context.Context, stdout io.Writer, cfg config.Config, args []
 		return err
 	}
 	for _, r := range results {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", r.Kind, r.ID, r.Title, r.Text)
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", searchField(r.Kind), searchField(r.ID), searchField(r.Title), searchField(r.Text))
 	}
 	return nil
+}
+
+func searchField(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func runSQL(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {

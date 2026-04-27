@@ -655,8 +655,30 @@ func (s *Store) Search(ctx context.Context, q string, limit int) ([]SearchResult
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.queryContext(ctx, `select 'page', page_id, title, snippet(page_fts, 2, '[', ']', '...', 16)
-		from page_fts where page_fts match ? limit ?`, q, limit)
+	rows, err := s.queryContext(ctx, `select kind, id, title, text from (
+			select 'page' as kind,
+				page_fts.page_id as id,
+				page_fts.title as title,
+				snippet(page_fts, 2, '[', ']', '...', 16) as text,
+				bm25(page_fts) as rank,
+				coalesce(p.last_edited_time, p.created_time, 0) as edited_at
+			from page_fts
+			join pages p on p.id = page_fts.page_id
+			where page_fts match ?
+			union all
+			select 'comment' as kind,
+				comment_fts.comment_id as id,
+				coalesce(p.title, '') as title,
+				snippet(comment_fts, 2, '[', ']', '...', 16) as text,
+				bm25(comment_fts) as rank,
+				coalesce(c.last_edited_time, c.created_time, 0) as edited_at
+			from comment_fts
+			join comments c on c.id = comment_fts.comment_id
+			left join pages p on p.id = comment_fts.page_id
+			where comment_fts match ?
+		)
+		order by rank, edited_at desc, kind, lower(title), id
+		limit ?`, q, q, limit)
 	if err != nil {
 		return nil, err
 	}
