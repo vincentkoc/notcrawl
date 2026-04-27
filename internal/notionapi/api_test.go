@@ -187,3 +187,29 @@ func TestSyncIngestsCurrentDataSourcesAndRows(t *testing.T) {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
 }
+
+func TestIngestCommentsSkipsRestrictedResource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/comments" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"object":"error","status":403,"code":"restricted_resource","message":"Insufficient permissions for this endpoint."}`))
+	}))
+	defer server.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	count, err := (Client{BaseURL: server.URL, Version: "2022-06-28", Token: "secret", HTTP: http.DefaultClient}).ingestComments(context.Background(), st, "page1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("unexpected comment count: %d", count)
+	}
+}
