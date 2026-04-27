@@ -119,6 +119,76 @@ func (s *Store) PageComments(ctx context.Context, pageID string) ([]Comment, err
 	return comments, rows.Err()
 }
 
+func (s *Store) SpaceNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.queryContext(ctx, `select id, name from spaces`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TeamNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.queryContext(ctx, `select id, name from teams`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) BlockParents(ctx context.Context) (map[string]ParentRef, error) {
+	rows, err := s.queryContext(ctx, `select id, parent_id, parent_table from blocks`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]ParentRef{}
+	for rows.Next() {
+		var id string
+		var parentID, parentTable sql.NullString
+		if err := rows.Scan(&id, &parentID, &parentTable); err != nil {
+			return nil, err
+		}
+		out[id] = ParentRef{ID: parentID.String, Table: parentTable.String}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CollectionParents(ctx context.Context) (map[string]ParentRef, error) {
+	rows, err := s.queryContext(ctx, `select id, parent_id, parent_table from collections`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]ParentRef{}
+	for rows.Next() {
+		var id string
+		var parentID, parentTable sql.NullString
+		if err := rows.Scan(&id, &parentID, &parentTable); err != nil {
+			return nil, err
+		}
+		out[id] = ParentRef{ID: parentID.String, Table: parentTable.String}
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SpaceName(ctx context.Context, id string) (string, error) {
 	if id == "" {
 		return "default", nil

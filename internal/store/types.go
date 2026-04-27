@@ -105,6 +105,11 @@ type RawRecord struct {
 	SyncedAt    int64
 }
 
+type ParentRef struct {
+	ID    string
+	Table string
+}
+
 type SearchResult struct {
 	Kind  string
 	ID    string

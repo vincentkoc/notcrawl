@@ -39,10 +39,14 @@ func (e Exporter) Export(ctx context.Context) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
+	paths, err := newPathResolver(ctx, e.Store)
+	if err != nil {
+		return Summary{}, err
+	}
 	var s Summary
 	keep := map[string]bool{}
 	for _, page := range pages {
-		path, err := e.writePage(ctx, page)
+		path, err := e.writePage(ctx, paths, page)
 		if err != nil {
 			return s, err
 		}
@@ -56,19 +60,10 @@ func (e Exporter) Export(ctx context.Context) (Summary, error) {
 	return s, nil
 }
 
-func (e Exporter) writePage(ctx context.Context, page store.Page) (string, error) {
-	spaceName, err := e.Store.SpaceName(ctx, page.SpaceID)
-	if err != nil {
-		return "", err
-	}
-	teamID, err := e.Store.PageTeamID(ctx, page)
-	if err != nil {
-		return "", err
-	}
-	teamName, err := e.Store.TeamName(ctx, teamID)
-	if err != nil {
-		return "", err
-	}
+func (e Exporter) writePage(ctx context.Context, paths pathResolver, page store.Page) (string, error) {
+	spaceName := paths.spaceName(page.SpaceID)
+	teamID := paths.pageTeamID(page)
+	teamName := paths.teamName(teamID)
 	blocks, err := e.Store.PageBlocks(ctx, page.ID)
 	if err != nil {
 		return "", err
@@ -110,6 +105,80 @@ func (e Exporter) writePage(ctx context.Context, page store.Page) (string, error
 	}
 	out := strings.TrimRight(b.String(), " \n") + "\n"
 	return path, os.WriteFile(path, []byte(out), 0o644)
+}
+
+type pathResolver struct {
+	spaces      map[string]string
+	teams       map[string]string
+	blocks      map[string]store.ParentRef
+	collections map[string]store.ParentRef
+}
+
+func newPathResolver(ctx context.Context, st *store.Store) (pathResolver, error) {
+	spaces, err := st.SpaceNames(ctx)
+	if err != nil {
+		return pathResolver{}, err
+	}
+	teams, err := st.TeamNames(ctx)
+	if err != nil {
+		return pathResolver{}, err
+	}
+	blocks, err := st.BlockParents(ctx)
+	if err != nil {
+		return pathResolver{}, err
+	}
+	collections, err := st.CollectionParents(ctx)
+	if err != nil {
+		return pathResolver{}, err
+	}
+	return pathResolver{spaces: spaces, teams: teams, blocks: blocks, collections: collections}, nil
+}
+
+func (r pathResolver) spaceName(id string) string {
+	if id == "" {
+		return "default"
+	}
+	if name := r.spaces[id]; name != "" {
+		return name
+	}
+	return "space-" + notiontext.ShortID(id)
+}
+
+func (r pathResolver) teamName(id string) string {
+	if id == "" {
+		return ""
+	}
+	if name := r.teams[id]; name != "" {
+		return name
+	}
+	return "team-" + notiontext.ShortID(id)
+}
+
+func (r pathResolver) pageTeamID(page store.Page) string {
+	return r.resolveTeamID(page.ParentTable, page.ParentID, page.CollectionID, map[string]bool{page.ID: true})
+}
+
+func (r pathResolver) resolveTeamID(table, id, collectionID string, seen map[string]bool) string {
+	if table == "team" {
+		return id
+	}
+	if table == "collection" && id == "" {
+		id = collectionID
+	}
+	if id == "" || seen[table+":"+id] {
+		return ""
+	}
+	seen[table+":"+id] = true
+	switch table {
+	case "block":
+		parent := r.blocks[id]
+		return r.resolveTeamID(parent.Table, parent.ID, "", seen)
+	case "collection", "database", "data_source":
+		parent := r.collections[id]
+		return r.resolveTeamID(parent.Table, parent.ID, "", seen)
+	default:
+		return ""
+	}
 }
 
 func writeFrontMatter(b *strings.Builder, page store.Page, spaceName, teamID, teamName string) {
