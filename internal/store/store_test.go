@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,6 +67,45 @@ func TestStoreDefersPageFTSRefresh(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].ID != "page1" {
 		t.Fatalf("expected refreshed FTS after callback, got %+v", results)
+	}
+}
+
+func TestStoreTransactionCommitsAndRollsBack(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	now := NowMS()
+	if err := st.WithTransaction(ctx, func() error {
+		return st.UpsertPage(ctx, Page{ID: "commit", Title: "Commit", Alive: true, Source: "test", SyncedAt: now})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := st.DB().QueryRowContext(ctx, `select count(*) from pages where id = 'commit'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected committed page, got %d", count)
+	}
+
+	sentinel := errors.New("rollback")
+	err = st.WithTransaction(ctx, func() error {
+		if err := st.UpsertPage(ctx, Page{ID: "rollback", Title: "Rollback", Alive: true, Source: "test", SyncedAt: now}); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected rollback error, got %v", err)
+	}
+	if err := st.DB().QueryRowContext(ctx, `select count(*) from pages where id = 'rollback'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected rolled back page, got %d", count)
 	}
 }
 
