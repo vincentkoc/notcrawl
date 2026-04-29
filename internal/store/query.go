@@ -56,7 +56,10 @@ func (s *Store) Collection(ctx context.Context, id string) (Collection, error) {
 func (s *Store) CollectionPages(ctx context.Context, collectionID string) ([]Page, error) {
 	rows, err := s.queryContext(ctx, `select id, space_id, parent_id, parent_table, collection_id, title, url, icon, cover,
 		properties_json, created_time, last_edited_time, alive, source, raw_json, synced_at
-		from pages where collection_id = ? and alive = 1 order by coalesce(last_edited_time, 0) desc, title`, collectionID)
+		from pages
+		where alive = 1
+		  and (collection_id = ? or (parent_id = ? and parent_table in ('collection', 'database', 'data_source')))
+		order by coalesce(last_edited_time, 0) desc, title`, collectionID, collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +120,40 @@ func (s *Store) PageComments(ctx context.Context, pageID string) ([]Comment, err
 		comments = append(comments, c)
 	}
 	return comments, rows.Err()
+}
+
+func (s *Store) UserNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.queryContext(ctx, `select id, coalesce(nullif(name, ''), nullif(email, ''), id) from users`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) PageTitles(ctx context.Context) (map[string]string, error) {
+	rows, err := s.queryContext(ctx, `select id, coalesce(nullif(title, ''), id) from pages where alive = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, title string
+		if err := rows.Scan(&id, &title); err != nil {
+			return nil, err
+		}
+		out[id] = title
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) SpaceNames(ctx context.Context) (map[string]string, error) {

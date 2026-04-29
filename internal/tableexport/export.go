@@ -31,6 +31,16 @@ type Summary struct {
 	Columns  int
 }
 
+type exportColumn struct {
+	Key    string
+	Header string
+}
+
+type referenceLabels struct {
+	Users map[string]string
+	Pages map[string]string
+}
+
 func (e Exporter) Export(ctx context.Context, databaseID string, format Format, w io.Writer) (Summary, error) {
 	if e.Store == nil {
 		return Summary{}, fmt.Errorf("missing store")
@@ -46,21 +56,29 @@ func (e Exporter) Export(ctx context.Context, databaseID string, format Format, 
 	if err != nil {
 		return Summary{}, err
 	}
+	refs, err := e.referenceLabels(ctx)
+	if err != nil {
+		return Summary{}, err
+	}
 	columns := columnsFor(collection, pages)
+	headers := make([]string, 0, len(columns))
+	for _, col := range columns {
+		headers = append(headers, col.Header)
+	}
 	writer := csv.NewWriter(w)
 	if format == FormatTSV {
 		writer.Comma = '\t'
 	} else if format != "" && format != FormatCSV {
 		return Summary{}, fmt.Errorf("unsupported format %q", format)
 	}
-	if err := writer.Write(columns); err != nil {
+	if err := writer.Write(headers); err != nil {
 		return Summary{}, err
 	}
 	for _, page := range pages {
 		props := decodeMap(page.PropertiesJSON)
 		row := make([]string, 0, len(columns))
 		for _, col := range columns {
-			switch col {
+			switch col.Key {
 			case "page_id":
 				row = append(row, page.ID)
 			case "page_title":
@@ -68,7 +86,7 @@ func (e Exporter) Export(ctx context.Context, databaseID string, format Format, 
 			case "url":
 				row = append(row, page.URL)
 			default:
-				row = append(row, propertyValueText(props[col]))
+				row = append(row, propertyValueText(props[col.Key], refs))
 			}
 		}
 		if err := writer.Write(row); err != nil {
@@ -82,43 +100,93 @@ func (e Exporter) Export(ctx context.Context, databaseID string, format Format, 
 	return Summary{Database: collection.ID, Rows: len(pages), Columns: len(columns)}, nil
 }
 
-func columnsFor(collection store.Collection, pages []store.Page) []string {
-	seen := map[string]bool{"page_id": true, "page_title": true, "url": true}
-	cols := []string{"page_id", "page_title", "url"}
-	for _, name := range schemaPropertyNames(collection.SchemaJSON) {
-		if !seen[name] {
-			seen[name] = true
-			cols = append(cols, name)
+func (e Exporter) referenceLabels(ctx context.Context) (referenceLabels, error) {
+	users, err := e.Store.UserNames(ctx)
+	if err != nil {
+		return referenceLabels{}, err
+	}
+	pages, err := e.Store.PageTitles(ctx)
+	if err != nil {
+		return referenceLabels{}, err
+	}
+	return referenceLabels{Users: users, Pages: pages}, nil
+}
+
+func columnsFor(collection store.Collection, pages []store.Page) []exportColumn {
+	seenKeys := map[string]bool{"page_id": true, "page_title": true, "url": true}
+	seenHeaders := map[string]bool{"page_id": true, "page_title": true, "url": true}
+	cols := []exportColumn{
+		{Key: "page_id", Header: "page_id"},
+		{Key: "page_title", Header: "page_title"},
+		{Key: "url", Header: "url"},
+	}
+	for _, prop := range schemaProperties(collection.SchemaJSON) {
+		if !seenKeys[prop.Key] {
+			seenKeys[prop.Key] = true
+			prop.Header = uniqueHeader(prop.Header, prop.Key, seenHeaders)
+			cols = append(cols, prop)
 		}
 	}
-	var extras []string
+	var extras []exportColumn
 	for _, page := range pages {
-		for name := range decodeMap(page.PropertiesJSON) {
-			if !seen[name] {
-				seen[name] = true
-				extras = append(extras, name)
+		for key := range decodeMap(page.PropertiesJSON) {
+			if !seenKeys[key] {
+				seenKeys[key] = true
+				extras = append(extras, exportColumn{Key: key, Header: key})
 			}
 		}
 	}
-	sort.Strings(extras)
+	sort.Slice(extras, func(i, j int) bool {
+		return extras[i].Header < extras[j].Header
+	})
+	for i := range extras {
+		extras[i].Header = uniqueHeader(extras[i].Header, extras[i].Key, seenHeaders)
+	}
 	return append(cols, extras...)
 }
 
-func schemaPropertyNames(raw string) []string {
+func schemaProperties(raw string) []exportColumn {
 	props := decodeMap(raw)
-	var title []string
-	var rest []string
-	for name, value := range props {
+	var title []exportColumn
+	var rest []exportColumn
+	for key, value := range props {
 		m, ok := value.(map[string]any)
+		header := key
+		if ok {
+			if name, ok := m["name"].(string); ok && strings.TrimSpace(name) != "" {
+				header = name
+			}
+		}
+		prop := exportColumn{Key: key, Header: header}
 		if ok && m["type"] == "title" {
-			title = append(title, name)
+			title = append(title, prop)
 			continue
 		}
-		rest = append(rest, name)
+		rest = append(rest, prop)
 	}
-	sort.Strings(title)
-	sort.Strings(rest)
+	sort.Slice(title, func(i, j int) bool {
+		return title[i].Header < title[j].Header
+	})
+	sort.Slice(rest, func(i, j int) bool {
+		return rest[i].Header < rest[j].Header
+	})
 	return append(title, rest...)
+}
+
+func uniqueHeader(header, key string, seen map[string]bool) string {
+	if strings.TrimSpace(header) == "" {
+		header = key
+	}
+	if !seen[header] {
+		seen[header] = true
+		return header
+	}
+	disambiguated := header + " (" + key + ")"
+	for i := 2; seen[disambiguated]; i++ {
+		disambiguated = fmt.Sprintf("%s (%s %d)", header, key, i)
+	}
+	seen[disambiguated] = true
+	return disambiguated
 }
 
 func decodeMap(raw string) map[string]any {
@@ -130,7 +198,10 @@ func decodeMap(raw string) map[string]any {
 	return out
 }
 
-func propertyValueText(v any) string {
+func propertyValueText(v any, refs referenceLabels) string {
+	if text, ok := desktopValueText(v, refs); ok {
+		return text
+	}
 	m, ok := v.(map[string]any)
 	if !ok {
 		return notiontext.Plain(v)
@@ -161,17 +232,122 @@ func propertyValueText(v any) string {
 	case "people", "files":
 		return joinNamed(m[typ])
 	case "relation":
-		return joinIDs(m[typ])
+		return joinIDs(m[typ], refs)
 	case "formula":
-		return formulaText(m["formula"])
+		return formulaText(m["formula"], refs)
 	case "rollup":
-		return rollupText(m["rollup"])
+		return rollupText(m["rollup"], refs)
 	case "created_by", "last_edited_by":
 		return namedObject(m[typ])
 	case "unique_id":
 		return uniqueIDText(m["unique_id"])
 	}
 	return notiontext.Plain(v)
+}
+
+func desktopValueText(v any, refs referenceLabels) (string, bool) {
+	text, ok := desktopPlain(v, refs)
+	if !ok {
+		return "", false
+	}
+	text = notiontext.Normalize(strings.ReplaceAll(text, " , ", ", "))
+	return text, true
+}
+
+func desktopPlain(v any, refs referenceLabels) (string, bool) {
+	switch x := v.(type) {
+	case nil:
+		return "", true
+	case string:
+		if x == "‣" {
+			return "", true
+		}
+		return x, true
+	case []any:
+		if len(x) == 0 {
+			return "", true
+		}
+		if marker, ok := x[0].(string); ok {
+			if marker == "‣" && len(x) > 1 {
+				return desktopRefListText(x[1], refs), true
+			}
+			if marker == "," {
+				return ",", true
+			}
+			if marker != "" {
+				return marker, true
+			}
+		}
+		parts := make([]string, 0, len(x))
+		handled := false
+		for _, item := range x {
+			text, ok := desktopPlain(item, refs)
+			if !ok {
+				return "", false
+			}
+			handled = true
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, " "), handled
+	default:
+		return "", false
+	}
+}
+
+func desktopRefListText(v any, refs referenceLabels) string {
+	items, ok := v.([]any)
+	if !ok {
+		return notiontext.Plain(v)
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := desktopRefText(item, refs); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func desktopRefText(v any, refs referenceLabels) string {
+	item, ok := v.([]any)
+	if !ok || len(item) == 0 {
+		return notiontext.Plain(v)
+	}
+	typ, _ := item[0].(string)
+	switch typ {
+	case ",":
+		return ","
+	case "u":
+		if id, ok := stringAt(item, 1); ok {
+			return labelOrID(refs.Users, id)
+		}
+	case "p":
+		if id, ok := stringAt(item, 1); ok {
+			return labelOrID(refs.Pages, id)
+		}
+	case "d":
+		if len(item) > 1 {
+			return dateText(item[1])
+		}
+	}
+	return notiontext.Plain(v)
+}
+
+func stringAt(items []any, index int) (string, bool) {
+	if index >= len(items) {
+		return "", false
+	}
+	s, ok := items[index].(string)
+	return s, ok
+}
+
+func labelOrID(labels map[string]string, id string) string {
+	if label := labels[id]; label != "" {
+		return label
+	}
+	return id
 }
 
 func namedObject(v any) string {
@@ -181,6 +357,9 @@ func namedObject(v any) string {
 	}
 	if name, ok := m["name"].(string); ok {
 		return name
+	}
+	if value, ok := m["value"].(string); ok {
+		return value
 	}
 	if id, ok := m["id"].(string); ok {
 		return id
@@ -202,7 +381,7 @@ func joinNamed(v any) string {
 	return strings.Join(parts, ", ")
 }
 
-func joinIDs(v any) string {
+func joinIDs(v any, refs referenceLabels) string {
 	items, ok := v.([]any)
 	if !ok {
 		return ""
@@ -214,7 +393,7 @@ func joinIDs(v any) string {
 			continue
 		}
 		if id, ok := m["id"].(string); ok {
-			parts = append(parts, id)
+			parts = append(parts, labelOrID(refs.Pages, id))
 		}
 	}
 	return strings.Join(parts, ", ")
@@ -226,14 +405,20 @@ func dateText(v any) string {
 		return ""
 	}
 	start, _ := m["start"].(string)
+	if start == "" {
+		start, _ = m["start_date"].(string)
+	}
 	end, _ := m["end"].(string)
+	if end == "" {
+		end, _ = m["end_date"].(string)
+	}
 	if end != "" {
 		return start + "/" + end
 	}
 	return start
 }
 
-func formulaText(v any) string {
+func formulaText(v any, refs referenceLabels) string {
 	m, ok := v.(map[string]any)
 	if !ok {
 		return ""
@@ -252,10 +437,13 @@ func formulaText(v any) string {
 	case "date":
 		return dateText(m["date"])
 	}
+	if text, ok := desktopValueText(v, refs); ok {
+		return text
+	}
 	return notiontext.Plain(v)
 }
 
-func rollupText(v any) string {
+func rollupText(v any, refs referenceLabels) string {
 	m, ok := v.(map[string]any)
 	if !ok {
 		return ""
@@ -270,11 +458,14 @@ func rollupText(v any) string {
 		items, _ := m["array"].([]any)
 		parts := make([]string, 0, len(items))
 		for _, item := range items {
-			if text := propertyValueText(item); text != "" {
+			if text := propertyValueText(item, refs); text != "" {
 				parts = append(parts, text)
 			}
 		}
 		return strings.Join(parts, ", ")
+	}
+	if text, ok := desktopValueText(v, refs); ok {
+		return text
 	}
 	return notiontext.Plain(v)
 }
