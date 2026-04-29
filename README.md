@@ -59,6 +59,7 @@ export NOTION_TOKEN="secret_..."
 notcrawl sync --source api
 notcrawl databases
 notcrawl export-db --database DATABASE_ID --format csv --output roadmap.csv
+notcrawl export-db --all --dir exports/csv
 ```
 
 Default paths:
@@ -79,7 +80,7 @@ Default paths:
 - `sync` ingests from `desktop`, `api`, or `all`
 - `export-md` renders normalized Markdown files from SQLite
 - `databases` lists crawled Notion databases
-- `export-db` exports a crawled Notion database to CSV or TSV
+- `export-db` exports one crawled Notion database, or all databases with `--all --dir`, to CSV or TSV
 - `search` searches page and comment text through FTS5
 - `sql` runs read-only SQL against the archive
 - `publish` exports SQLite tables and Markdown into a git share repo

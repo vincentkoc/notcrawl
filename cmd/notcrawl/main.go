@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vincentkoc/notcrawl/internal/config"
 	"github.com/vincentkoc/notcrawl/internal/markdown"
 	"github.com/vincentkoc/notcrawl/internal/notionapi"
 	"github.com/vincentkoc/notcrawl/internal/notiondesktop"
+	"github.com/vincentkoc/notcrawl/internal/notiontext"
 	"github.com/vincentkoc/notcrawl/internal/report"
 	"github.com/vincentkoc/notcrawl/internal/share"
 	"github.com/vincentkoc/notcrawl/internal/store"
@@ -276,10 +278,24 @@ func runDatabases(ctx context.Context, stdout io.Writer, cfg config.Config) erro
 func runExportDatabase(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("export-db", flag.ContinueOnError)
 	databaseID := fs.String("database", "", "database id to export")
+	all := fs.Bool("all", false, "export every crawled database")
+	dir := fs.String("dir", "", "directory for --all exports")
 	format := fs.String("format", "csv", "output format: csv or tsv")
 	output := fs.String("output", "", "output file path, defaults to stdout")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *all {
+		if *databaseID != "" {
+			return fmt.Errorf("export-db cannot combine --all and --database")
+		}
+		if *output != "" {
+			return fmt.Errorf("export-db cannot combine --all and --output")
+		}
+		if *dir == "" {
+			return fmt.Errorf("export-db --all requires --dir")
+		}
+		return runExportAllDatabases(ctx, stdout, cfg, tableexport.Format(*format), *dir)
 	}
 	if *databaseID == "" {
 		return fmt.Errorf("export-db requires --database")
@@ -311,6 +327,89 @@ func runExportDatabase(ctx context.Context, stdout io.Writer, cfg config.Config,
 		fmt.Fprintf(stdout, "exported %d rows and %d columns from %s to %s\n", s.Rows, s.Columns, s.Database, file.Name())
 	}
 	return nil
+}
+
+func runExportAllDatabases(ctx context.Context, stdout io.Writer, cfg config.Config, format tableexport.Format, dir string) error {
+	ext, err := exportExtension(format)
+	if err != nil {
+		return err
+	}
+	dir, err = config.ExpandPath(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	collections, err := st.Collections(ctx)
+	if err != nil {
+		return err
+	}
+	index, err := os.Create(filepath.Join(dir, "index.tsv"))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(index, "id\tname\tsource\trows\tcolumns\tfile")
+	exporter := tableexport.Exporter{Store: st}
+	used := map[string]bool{}
+	var databases, rows int
+	for _, collection := range collections {
+		name := exportDatabaseFilename(collection, ext, used)
+		path := filepath.Join(dir, name)
+		file, err := os.Create(path)
+		if err != nil {
+			_ = index.Close()
+			return err
+		}
+		s, exportErr := exporter.Export(ctx, collection.ID, format, file)
+		closeErr := file.Close()
+		if exportErr != nil {
+			_ = index.Close()
+			return exportErr
+		}
+		if closeErr != nil {
+			_ = index.Close()
+			return closeErr
+		}
+		databases++
+		rows += s.Rows
+		fmt.Fprintf(index, "%s\t%s\t%s\t%d\t%d\t%s\n", collection.ID, collection.Name, collection.Source, s.Rows, s.Columns, name)
+	}
+	if err := index.Close(); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "exported %d databases and %d rows to %s\n", databases, rows, dir)
+	return nil
+}
+
+func exportExtension(format tableexport.Format) (string, error) {
+	switch format {
+	case "", tableexport.FormatCSV:
+		return "csv", nil
+	case tableexport.FormatTSV:
+		return "tsv", nil
+	default:
+		return "", fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+func exportDatabaseFilename(collection store.Collection, ext string, used map[string]bool) string {
+	baseName := collection.Name
+	if strings.TrimSpace(baseName) == "" {
+		baseName = collection.ID
+	}
+	base := notiontext.Slug(baseName) + "-" + notiontext.ShortID(collection.ID)
+	name := base + "." + ext
+	for i := 2; used[name]; i++ {
+		name = fmt.Sprintf("%s-%d.%s", base, i, ext)
+	}
+	used[name] = true
+	return name
 }
 
 func runSearch(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
@@ -489,6 +588,7 @@ Commands:
   export-md                 Render normalized Markdown from SQLite
   databases                 List crawled Notion databases
   export-db --database ID   Export a database as CSV or TSV
+  export-db --all --dir DIR Export every database as CSV or TSV
   search QUERY              Search page text
   sql QUERY                 Run read-only SQL
   publish [--push]          Export data and Markdown into a git share repo

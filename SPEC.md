@@ -163,6 +163,7 @@ those pages through `pages.collection_id`.
 ```text
 notcrawl export-db --database <database-id> --format csv --output rows.csv
 notcrawl export-db --database <database-id> --format tsv --output rows.tsv
+notcrawl export-db --all --dir exports/csv
 ```
 
 The first columns are stable metadata:
