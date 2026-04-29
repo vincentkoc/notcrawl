@@ -9,6 +9,62 @@ func TestTitleFromProperties(t *testing.T) {
 	}
 }
 
+func TestTitleFromPropertiesPrefersNotionRichTextOnce(t *testing.T) {
+	got := TitleFromProperties(`{
+		"Name": {
+			"id": "title",
+			"type": "title",
+			"title": [{
+				"type": "text",
+				"plain_text": "OpenClaw",
+				"text": {"content": "OpenClaw"}
+			}]
+		}
+	}`)
+	if got != "OpenClaw" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPlainPrefersNotionRichTextPlainTextOnce(t *testing.T) {
+	got := Plain([]any{map[string]any{
+		"type":       "text",
+		"plain_text": "OpenClaw",
+		"text": map[string]any{
+			"content": "OpenClaw",
+		},
+	}})
+	if got != "OpenClaw" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPlainFallsBackToNotionTextContentOnce(t *testing.T) {
+	got := Plain([]any{map[string]any{
+		"type": "text",
+		"text": map[string]any{
+			"content": "OpenClaw",
+		},
+	}})
+	if got != "OpenClaw" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPlainWalksTitleOnlyOnce(t *testing.T) {
+	got := Plain(map[string]any{
+		"title": []any{map[string]any{
+			"plain_text": "Roadmap",
+			"text": map[string]any{
+				"content": "Roadmap",
+			},
+		}},
+	})
+	if got != "Roadmap" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestSlug(t *testing.T) {
 	got := Slug("Launch Plan / Q2")
 	if got != "launch-plan-q2" {

@@ -32,7 +32,7 @@ func TestSyncIngestsDatabasesAndRows(t *testing.T) {
 					"results":[{
 						"object":"database",
 						"id":"db1",
-						"title":[{"plain_text":"Roadmap"}],
+						"title":[{"type":"text","plain_text":"Roadmap","text":{"content":"Roadmap"}}],
 						"parent":{"type":"workspace","workspace":true},
 						"properties":{
 							"Name":{"id":"title","type":"title","title":{}},
@@ -57,7 +57,7 @@ func TestSyncIngestsDatabasesAndRows(t *testing.T) {
 					"url":"https://notion.so/page1",
 					"parent":{"type":"database_id","database_id":"db1"},
 					"properties":{
-						"Name":{"id":"title","type":"title","title":[{"plain_text":"Ship"}]},
+						"Name":{"id":"title","type":"title","title":[{"type":"text","plain_text":"Ship","text":{"content":"Ship"}}]},
 						"Status":{"id":"status","type":"select","select":{"name":"Done"}}
 					}
 				}],
@@ -93,7 +93,7 @@ func TestSyncIngestsDatabasesAndRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].ID != "page1" || rows[0].CollectionID != "db1" {
+	if len(rows) != 1 || rows[0].ID != "page1" || rows[0].CollectionID != "db1" || rows[0].Title != "Ship" {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
 }
@@ -122,7 +122,7 @@ func TestSyncIngestsCurrentDataSourcesAndRows(t *testing.T) {
 					"results":[{
 						"object":"data_source",
 						"id":"ds1",
-						"title":[{"plain_text":"Roadmap"}],
+						"title":[{"type":"text","plain_text":"Roadmap","text":{"content":"Roadmap"}}],
 						"parent":{"type":"database_id","database_id":"db1"},
 						"database_parent":{"type":"page_id","page_id":"page-parent"},
 						"properties":{
@@ -147,7 +147,7 @@ func TestSyncIngestsCurrentDataSourcesAndRows(t *testing.T) {
 					"url":"https://notion.so/page1",
 					"parent":{"type":"data_source_id","data_source_id":"ds1"},
 					"properties":{
-						"Name":{"id":"title","type":"title","title":[{"plain_text":"Ship"}]},
+						"Name":{"id":"title","type":"title","title":[{"type":"text","plain_text":"Ship","text":{"content":"Ship"}}]},
 						"Status":{"id":"status","type":"select","select":{"name":"Done"}}
 					}
 				}],
@@ -176,14 +176,14 @@ func TestSyncIngestsCurrentDataSourcesAndRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(collections) != 1 || collections[0].ID != "ds1" || collections[0].ParentID != "db1" {
+	if len(collections) != 1 || collections[0].ID != "ds1" || collections[0].ParentID != "db1" || collections[0].Name != "Roadmap" {
 		t.Fatalf("unexpected collections: %+v", collections)
 	}
 	rows, err := st.CollectionPages(context.Background(), "ds1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].ID != "page1" || rows[0].CollectionID != "ds1" {
+	if len(rows) != 1 || rows[0].ID != "page1" || rows[0].CollectionID != "ds1" || rows[0].Title != "Ship" {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
 }

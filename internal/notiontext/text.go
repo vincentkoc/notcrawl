@@ -131,19 +131,42 @@ func walk(v any, parts *[]string) {
 			walk(item, parts)
 		}
 	case map[string]any:
-		for _, key := range []string{"plain_text", "content", "text", "name", "title"} {
+		if text, ok := normalizedString(x["plain_text"]); ok {
+			*parts = append(*parts, text)
+			return
+		}
+		if text, ok := richTextContent(x["text"]); ok {
+			*parts = append(*parts, text)
+			return
+		}
+		if text, ok := normalizedString(x["content"]); ok {
+			*parts = append(*parts, text)
+			return
+		}
+		for _, key := range []string{"name", "title", "rich_text", "text"} {
 			if value, ok := x[key]; ok {
 				walk(value, parts)
 			}
 		}
-		if rt, ok := x["rich_text"]; ok {
-			walk(rt, parts)
-		}
-		if title, ok := x["title"]; ok {
-			walk(title, parts)
-		}
-		if text, ok := x["text"].(map[string]any); ok {
-			walk(text["content"], parts)
-		}
 	}
+}
+
+func richTextContent(v any) (string, bool) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	return normalizedString(m["content"])
+}
+
+func normalizedString(v any) (string, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	s = Normalize(s)
+	if s == "" {
+		return "", false
+	}
+	return s, true
 }
