@@ -17,6 +17,8 @@ import (
 
 const SourceName = "api"
 
+const maxAPIAttempts = 4
+
 type Client struct {
 	BaseURL string
 	Version string
@@ -448,56 +450,50 @@ func (c Client) ingestComments(ctx context.Context, st *store.Store, pageID, spa
 }
 
 func (c Client) do(ctx context.Context, method, path string, body any, out any) error {
-	var reader io.Reader
+	var bodyBytes []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		reader = bytes.NewReader(b)
+		bodyBytes = b
 	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.BaseURL, "/")+path, reader)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Notion-Version", c.Version)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if wait, err := time.ParseDuration(resp.Header.Get("Retry-After") + "s"); err == nil && wait > 0 {
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-			return c.do(ctx, method, path, body, out)
+	for attempt := 1; attempt <= maxAPIAttempts; attempt++ {
+		var reader io.Reader
+		if bodyBytes != nil {
+			reader = bytes.NewReader(bodyBytes)
 		}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.BaseURL, "/")+path, reader)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		req.Header.Set("Notion-Version", c.Version)
+		req.Header.Set("Accept", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			defer resp.Body.Close()
+			return json.NewDecoder(resp.Body).Decode(out)
+		}
+
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		bodyText := strings.TrimSpace(string(b))
-		apiErr := notionAPIError{Method: method, Path: path, Status: resp.Status, StatusCode: resp.StatusCode, Body: bodyText}
-		var payload struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		}
-		if err := json.Unmarshal(b, &payload); err == nil {
-			apiErr.Code = payload.Code
-			apiErr.Message = payload.Message
+		resp.Body.Close()
+		apiErr := apiErrorFromResponse(method, path, resp, b)
+		if attempt < maxAPIAttempts && shouldRetry(apiErr) {
+			if err := waitBeforeRetry(ctx, apiErr.RetryAfter); err != nil {
+				return err
+			}
+			continue
 		}
 		return apiErr
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return nil
 }
 
 type notionAPIError struct {
@@ -508,6 +504,8 @@ type notionAPIError struct {
 	Code       string
 	Message    string
 	Body       string
+	RetryAfter time.Duration
+	Retryable  bool
 }
 
 func (e notionAPIError) Error() string {
@@ -515,6 +513,76 @@ func (e notionAPIError) Error() string {
 		return fmt.Sprintf("notion api %s %s: %s: %s: %s", e.Method, e.Path, e.Status, e.Code, e.Message)
 	}
 	return fmt.Sprintf("notion api %s %s: %s: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+func apiErrorFromResponse(method, path string, resp *http.Response, body []byte) notionAPIError {
+	bodyText := strings.TrimSpace(string(body))
+	apiErr := notionAPIError{
+		Method:     method,
+		Path:       path,
+		Status:     resp.Status,
+		StatusCode: resp.StatusCode,
+		Body:       bodyText,
+		RetryAfter: retryAfter(resp.Header.Get("Retry-After"), body),
+	}
+	var payload struct {
+		Code       string  `json:"code"`
+		Message    string  `json:"message"`
+		Retryable  bool    `json:"retryable"`
+		RetryAfter float64 `json:"retry_after"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil {
+		apiErr.Code = payload.Code
+		apiErr.Message = payload.Message
+		apiErr.Retryable = payload.Retryable
+		if payload.RetryAfter > 0 && apiErr.RetryAfter == 0 {
+			apiErr.RetryAfter = time.Duration(payload.RetryAfter * float64(time.Second))
+		}
+	}
+	return apiErr
+}
+
+func shouldRetry(err notionAPIError) bool {
+	if err.StatusCode == http.StatusTooManyRequests || err.Retryable {
+		return true
+	}
+	return err.StatusCode == http.StatusBadGateway ||
+		err.StatusCode == http.StatusServiceUnavailable ||
+		err.StatusCode == http.StatusGatewayTimeout
+}
+
+func retryAfter(header string, body []byte) time.Duration {
+	if header != "" {
+		if seconds, err := time.ParseDuration(header + "s"); err == nil && seconds > 0 {
+			return seconds
+		}
+		if when, err := http.ParseTime(header); err == nil {
+			if wait := time.Until(when); wait > 0 {
+				return wait
+			}
+		}
+	}
+	var payload struct {
+		RetryAfter float64 `json:"retry_after"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil && payload.RetryAfter > 0 {
+		return time.Duration(payload.RetryAfter * float64(time.Second))
+	}
+	return 0
+}
+
+func waitBeforeRetry(ctx context.Context, wait time.Duration) error {
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func isIgnoredCommentError(err error) bool {

@@ -213,3 +213,52 @@ func TestIngestCommentsSkipsRestrictedResource(t *testing.T) {
 		t.Fatalf("unexpected comment count: %d", count)
 	}
 }
+
+func TestIngestCommentsRetriesTransientGatewayError(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/comments" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"retryable":true,"retry_after":0}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"object":"list",
+			"results":[{
+				"id":"comment1",
+				"rich_text":[{"type":"text","plain_text":"Looks good","text":{"content":"Looks good"}}],
+				"created_by":{"id":"user1"},
+				"created_time":"2026-01-01T00:00:00Z",
+				"last_edited_time":"2026-01-01T00:00:00Z"
+			}],
+			"has_more":false
+		}`))
+	}))
+	defer server.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	count, err := (Client{BaseURL: server.URL, Version: "2026-03-11", Token: "secret", HTTP: http.DefaultClient}).ingestComments(context.Background(), st, "page1", "space1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || attempts != 2 {
+		t.Fatalf("unexpected count/attempts: count=%d attempts=%d", count, attempts)
+	}
+	comments, err := st.PageComments(context.Background(), "page1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 || comments[0].Text != "Looks good" {
+		t.Fatalf("unexpected comments: %+v", comments)
+	}
+}
