@@ -103,7 +103,7 @@ func Slug(s string) string {
 }
 
 func isSlugRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || (r > unicode.MaxASCII && unicode.IsSymbol(r)) || r == '\u200d'
+	return unicode.IsLetter(r) || unicode.IsNumber(r)
 }
 
 func isSlugSeparator(r rune) bool {

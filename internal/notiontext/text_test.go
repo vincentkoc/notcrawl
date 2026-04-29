@@ -72,9 +72,9 @@ func TestSlug(t *testing.T) {
 	}
 }
 
-func TestSlugPreservesUnicodePathText(t *testing.T) {
+func TestSlugRemovesEmojiPathText(t *testing.T) {
 	got := Slug("研究 🚀 / 計画 ✅")
-	if got != "研究-🚀-計画-✅" {
+	if got != "研究-計画" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -82,6 +82,13 @@ func TestSlugPreservesUnicodePathText(t *testing.T) {
 func TestSlugRemovesUnsafePathText(t *testing.T) {
 	got := Slug(`A/B\C:D*E?F"G<H>I|J`)
 	if got != "a-b-c-d-e-f-g-h-i-j" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSlugRemovesEmojiVariationSelectors(t *testing.T) {
+	got := Slug("⚠️ Production Incident Guide")
+	if got != "production-incident-guide" {
 		t.Fatalf("got %q", got)
 	}
 }

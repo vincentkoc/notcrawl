@@ -79,7 +79,7 @@ func TestExporterUsesDisplayOrder(t *testing.T) {
 	}
 }
 
-func TestExporterPreservesUnicodePathNames(t *testing.T) {
+func TestExporterRemovesEmojiFromPathNames(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
 	if err != nil {
@@ -99,7 +99,7 @@ func TestExporterPreservesUnicodePathNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(dir, "研究-🚀", "計画-✅-q2-page1.md")
+	want := filepath.Join(dir, "研究", "計画-q2-page1.md")
 	if len(s.Files) != 1 || s.Files[0] != want {
 		t.Fatalf("unexpected export path: %+v, want %s", s.Files, want)
 	}
