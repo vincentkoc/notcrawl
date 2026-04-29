@@ -29,7 +29,7 @@ func TestExportDatabaseAllWritesFilesAndIndex(t *testing.T) {
 	now := store.NowMS()
 	for _, collection := range []store.Collection{
 		{ID: "db1", Name: "Roadmap", Source: "test", SyncedAt: now, SchemaJSON: `{"Name":{"type":"title"}}`},
-		{ID: "db2", Name: "Launch Plan", Source: "test", SyncedAt: now, SchemaJSON: `{"Task":{"type":"title"}}`},
+		{ID: "db2", Name: "Launch 🚀 Plan ✅", Source: "test", SyncedAt: now, SchemaJSON: `{"Task":{"type":"title"}}`},
 	} {
 		if err := st.UpsertCollection(ctx, collection); err != nil {
 			t.Fatal(err)
