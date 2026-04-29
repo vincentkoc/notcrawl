@@ -56,7 +56,6 @@ jobs:
           SOURCE_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          VERSION="${TAG#v}"
           SOURCE_URL="https://github.com/${SOURCE_REPO}/archive/refs/tags/${TAG}.tar.gz"
 
           curl -fsSL "${SOURCE_URL}" -o /tmp/notcrawl-src.tar.gz
@@ -70,7 +69,6 @@ jobs:
             url "${SOURCE_URL}"
             sha256 "${SHA256}"
             license "MIT"
-            version "${VERSION}"
 
             depends_on "go" => :build
 
