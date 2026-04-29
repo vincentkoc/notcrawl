@@ -27,19 +27,27 @@ jobs:
   update-tap:
     runs-on: ubuntu-latest
     if: startsWith(github.event.release.tag_name || inputs.tag_name, 'v')
+    env:
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'vincentkoc/homebrew-tap' }}
     steps:
       - name: Validate tap configuration
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}" ]; then
+          if [ -z "${GH_TOKEN}" ]; then
             echo "Secret HOMEBREW_TAP_GITHUB_TOKEN is required."
+            exit 1
+          fi
+          if [ "$(gh api "repos/${TAP_REPO}" --jq '.permissions.push // false')" != "true" ]; then
+            echo "HOMEBREW_TAP_GITHUB_TOKEN must have push access to ${TAP_REPO}."
             exit 1
           fi
 
       - name: Checkout tap repository
         uses: actions/checkout@v5
         with:
-          repository: ${{ vars.HOMEBREW_TAP_REPO || 'vincentkoc/homebrew-tap' }}
+          repository: ${{ env.TAP_REPO }}
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
       - name: Update formula
