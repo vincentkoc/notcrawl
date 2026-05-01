@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vincentkoc/crawlkit/gitshare"
 	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
@@ -117,22 +118,14 @@ func Publish(ctx context.Context, st *store.Store, opts PublishOptions) (Publish
 	}
 	s := PublishSummary{Manifest: manifest}
 	if opts.Commit {
-		if err := runGit(ctx, opts.RepoPath, "add", "manifest.json", "data", "pages"); err != nil {
-			return s, err
-		}
-		dirty, err := hasChanges(ctx, opts.RepoPath)
+		committed, err := gitshare.Commit(ctx, gitshare.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}, opts.Message)
 		if err != nil {
 			return s, err
 		}
-		if dirty {
-			if err := runGit(ctx, opts.RepoPath, "commit", "-m", opts.Message); err != nil {
-				return s, err
-			}
-			s.Committed = true
-		}
+		s.Committed = committed
 	}
 	if opts.Push {
-		if err := runGit(ctx, opts.RepoPath, "push", "-u", "origin", opts.Branch); err != nil {
+		if err := gitshare.Push(ctx, gitshare.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}); err != nil {
 			return s, err
 		}
 		s.Pushed = true
@@ -167,18 +160,7 @@ func Subscribe(ctx context.Context, st *store.Store, remote, repoPath, branch st
 	if branch == "" {
 		branch = "main"
 	}
-	if _, err := os.Stat(filepath.Join(repoPath, ".git")); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(repoPath), 0o755); err != nil {
-			return Manifest{}, err
-		}
-		if err := run(ctx, "", "git", "clone", "--branch", branch, remote, repoPath); err != nil {
-			return Manifest{}, err
-		}
-	} else if err == nil {
-		if err := runGit(ctx, repoPath, "pull", "--ff-only", "origin", branch); err != nil {
-			return Manifest{}, err
-		}
-	} else {
+	if err := gitshare.Pull(ctx, gitshare.Options{RepoPath: repoPath, Remote: remote, Branch: branch}); err != nil {
 		return Manifest{}, err
 	}
 	return Import(ctx, st, repoPath)
@@ -188,7 +170,7 @@ func Update(ctx context.Context, st *store.Store, repoPath, branch string) (Mani
 	if branch == "" {
 		branch = "main"
 	}
-	if err := runGit(ctx, repoPath, "pull", "--ff-only", "origin", branch); err != nil {
+	if err := gitshare.Pull(ctx, gitshare.Options{RepoPath: repoPath, Branch: branch}); err != nil {
 		return Manifest{}, err
 	}
 	return Import(ctx, st, repoPath)
@@ -286,35 +268,11 @@ func importTable(ctx context.Context, db *sql.DB, path, table string) error {
 }
 
 func ensureRepo(ctx context.Context, repoPath, remote, branch string) error {
-	if err := os.MkdirAll(repoPath, 0o755); err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(repoPath, ".git")); os.IsNotExist(err) {
-		if err := runGit(ctx, repoPath, "init", "-b", branch); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-	if remote != "" {
-		if err := runGit(ctx, repoPath, "remote", "get-url", "origin"); err != nil {
-			if err := runGit(ctx, repoPath, "remote", "add", "origin", remote); err != nil {
-				return err
-			}
-		} else if err := runGit(ctx, repoPath, "remote", "set-url", "origin", remote); err != nil {
-			return err
-		}
-	}
-	return nil
+	return gitshare.EnsureRepo(ctx, gitshare.Options{RepoPath: repoPath, Remote: remote, Branch: branch})
 }
 
 func hasChanges(ctx context.Context, repoPath string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain")
-	out, err := cmd.Output()
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) != "", nil
+	return gitshare.Dirty(ctx, gitshare.Options{RepoPath: repoPath})
 }
 
 func runGit(ctx context.Context, dir string, args ...string) error {
