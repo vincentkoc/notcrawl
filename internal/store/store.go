@@ -41,6 +41,19 @@ func Open(path string) (*Store, error) {
 	return st, nil
 }
 
+func OpenReadOnly(path string) (*Store, error) {
+	base, err := sqlitekit.OpenReadOnly(context.Background(), path)
+	if err != nil {
+		return nil, err
+	}
+	db := base.DB()
+	if err := db.PingContext(context.Background()); err != nil {
+		_ = base.Close()
+		return nil, err
+	}
+	return &Store{db: db, path: path}, nil
+}
+
 func (s *Store) DB() *sql.DB {
 	return s.db
 }

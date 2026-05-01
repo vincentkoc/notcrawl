@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/vincentkoc/crawlkit/termkit"
 	"github.com/vincentkoc/notcrawl/internal/config"
 	"github.com/vincentkoc/notcrawl/internal/markdown"
 	"github.com/vincentkoc/notcrawl/internal/notionapi"
@@ -85,6 +88,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runExportDatabase(ctx, stdout, cfg, cmdArgs)
 	case "search":
 		return runSearch(ctx, stdout, cfg, cmdArgs)
+	case "tui":
+		return runTUI(ctx, stdout, cfg, cmdArgs)
 	case "sql":
 		return runSQL(ctx, stdout, cfg, cmdArgs)
 	case "publish":
@@ -431,6 +436,128 @@ func runSearch(ctx context.Context, stdout io.Writer, cfg config.Config, args []
 	return nil
 }
 
+func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	limit := fs.Int("limit", 200, "maximum rows to load")
+	kind := fs.String("kind", "all", "rows to browse: all, pages, databases")
+	jsonOut := fs.Bool("json", false, "print browser rows as JSON instead of opening the terminal UI")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("tui takes flags only")
+	}
+	if *limit <= 0 {
+		return fmt.Errorf("tui --limit must be positive")
+	}
+	items, err := tuiItems(ctx, cfg, *kind, *limit)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(items)
+	}
+	if err := termkit.Run(ctx, termkit.Options{
+		Title:        "notcrawl archive",
+		EmptyMessage: "notcrawl has no local pages or databases yet",
+		Items:        items,
+	}); err != nil {
+		if errors.Is(err, termkit.ErrNotTerminal) {
+			return fmt.Errorf("%w; run notcrawl tui from a TTY or pass --json", err)
+		}
+		return err
+	}
+	return nil
+}
+
+func tuiItems(ctx context.Context, cfg config.Config, kind string, limit int) ([]termkit.Item, error) {
+	st, err := store.OpenReadOnly(cfg.DBPath)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	var items []termkit.Item
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "", "all":
+		pages, err := st.Pages(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, pageTUIItems(pages, limit)...)
+		if len(items) < limit {
+			collections, err := st.Collections(ctx)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, collectionTUIItems(collections, limit-len(items))...)
+		}
+	case "pages", "page":
+		pages, err := st.Pages(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, pageTUIItems(pages, limit)...)
+	case "databases", "database", "collections", "collection":
+		collections, err := st.Collections(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, collectionTUIItems(collections, limit)...)
+	default:
+		return nil, fmt.Errorf("unknown tui kind %q", kind)
+	}
+	return items, nil
+}
+
+func pageTUIItems(pages []store.Page, limit int) []termkit.Item {
+	if limit > len(pages) {
+		limit = len(pages)
+	}
+	items := make([]termkit.Item, 0, limit)
+	for _, page := range pages[:limit] {
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			title = page.ID
+		}
+		items = append(items, termkit.Item{
+			Title:    title,
+			Subtitle: strings.TrimSpace(strings.Join([]string{"page", page.Source, formatMillis(page.LastEditedTime)}, " ")),
+			Detail:   strings.TrimSpace(strings.Join([]string{page.URL, "id=" + page.ID, "parent=" + page.ParentTable + ":" + page.ParentID, "collection=" + page.CollectionID}, "\n")),
+			Tags:     []string{"page", page.Source},
+		})
+	}
+	return items
+}
+
+func collectionTUIItems(collections []store.Collection, limit int) []termkit.Item {
+	if limit > len(collections) {
+		limit = len(collections)
+	}
+	items := make([]termkit.Item, 0, limit)
+	for _, collection := range collections[:limit] {
+		title := strings.TrimSpace(collection.Name)
+		if title == "" {
+			title = collection.ID
+		}
+		items = append(items, termkit.Item{
+			Title:    title,
+			Subtitle: strings.TrimSpace(strings.Join([]string{"database", collection.Source}, " ")),
+			Detail:   strings.TrimSpace(strings.Join([]string{"id=" + collection.ID, "parent=" + collection.ParentTable + ":" + collection.ParentID}, "\n")),
+			Tags:     []string{"database", collection.Source},
+		})
+	}
+	return items
+}
+
+func formatMillis(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
+}
+
 func searchField(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
@@ -590,6 +717,7 @@ Commands:
   export-db --database ID   Export a database as CSV or TSV
   export-db --all --dir DIR Export every database as CSV or TSV
   search QUERY              Search page text
+  tui                       Browse pages and databases in the terminal UI
   sql QUERY                 Run read-only SQL
   publish [--push]          Export data and Markdown into a git share repo
   subscribe REMOTE          Clone/import a git share repo
