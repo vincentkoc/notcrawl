@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vincentkoc/crawlkit/control"
 	"github.com/vincentkoc/crawlkit/tui"
 	"github.com/vincentkoc/notcrawl/internal/config"
 	"github.com/vincentkoc/notcrawl/internal/markdown"
@@ -24,6 +26,8 @@ import (
 	"github.com/vincentkoc/notcrawl/internal/tableexport"
 )
 
+var version = "dev"
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "notcrawl:", err)
@@ -32,6 +36,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "--version" {
+		fmt.Fprintln(stdout, version)
+		return nil
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printHelp(stdout)
 		return nil
@@ -50,6 +58,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	cmd := rest[0]
 	cmdArgs := rest[1:]
+	if cmd == "version" {
+		fmt.Fprintln(stdout, version)
+		return nil
+	}
+	if cmd == "metadata" {
+		return runMetadata(stdout)
+	}
 	if cmd == "init" {
 		path, err := config.WriteStarter(*configPath)
 		if err != nil {
@@ -70,15 +85,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	switch cmd {
 	case "doctor":
-		return runDoctor(ctx, stdout, cfg)
+		return runDoctor(ctx, stdout, cfg, cmdArgs)
 	case "status":
-		return runStatus(ctx, stdout, cfg)
+		return runStatus(ctx, stdout, cfg, cmdArgs)
 	case "report":
 		return runReport(ctx, stdout, cfg)
 	case "maintain":
 		return runMaintain(ctx, stdout, cfg, cmdArgs)
 	case "sync":
 		return runSync(ctx, stdout, cfg, cmdArgs)
+	case "tap":
+		return runSync(ctx, stdout, cfg, []string{"--source", "desktop"})
 	case "export-md":
 		return runExportMarkdown(ctx, stdout, cfg)
 	case "databases":
@@ -102,12 +119,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
-	st, err := store.Open(cfg.DBPath)
-	if err != nil {
+func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print doctor JSON")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	defer st.Close()
+	if fs.NArg() != 0 {
+		return fmt.Errorf("doctor takes flags only")
+	}
+	_ = jsonOut
 	desktop, err := notiondesktop.Inspect(cfg.Notion.Desktop.Path)
 	if err != nil {
 		return err
@@ -122,9 +143,18 @@ func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 		"api_token_env":     cfg.Notion.API.TokenEnv,
 		"api_token_present": cfg.APIToken() != "",
 	}
-	status, err := st.Status(ctx)
+	status := store.Status{DBPath: cfg.DBPath}
+	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
-		return err
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		defer st.Close()
+		status, err = st.Status(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	report["status"] = status
 	report["api_version"] = cfg.Notion.API.Version
@@ -136,15 +166,30 @@ func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 	return nil
 }
 
-func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config) error {
-	st, err := store.Open(cfg.DBPath)
-	if err != nil {
+func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print normalized crawlkit status JSON")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	defer st.Close()
-	status, err := st.Status(ctx)
+	if fs.NArg() != 0 {
+		return fmt.Errorf("status takes flags only")
+	}
+	status := store.Status{DBPath: cfg.DBPath}
+	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
-		return err
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		defer st.Close()
+		status, err = st.Status(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	if *jsonOut {
+		return writeJSON(stdout, controlStatus(cfg, status))
 	}
 	b, err := json.MarshalIndent(status, "", "  ")
 	if err != nil {
@@ -152,6 +197,91 @@ func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 	}
 	fmt.Fprintln(stdout, string(b))
 	return nil
+}
+
+func runMetadata(stdout io.Writer) error {
+	defaults := config.Default()
+	configPath, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	manifest := control.NewManifest("notcrawl", "Notion Crawl", "notcrawl")
+	manifest.Description = "Local-first Notion archive crawler."
+	manifest.Branding = control.Branding{SymbolName: "doc.text.magnifyingglass", AccentColor: "#111111", BundleIdentifier: "notion.id"}
+	manifest.Paths = control.Paths{
+		DefaultConfig:   configPath,
+		ConfigEnv:       "NOTCRAWL_CONFIG",
+		DefaultDatabase: defaults.DBPath,
+		DefaultCache:    defaults.CacheDir,
+		DefaultLogs:     filepath.Join(filepath.Dir(defaults.DBPath), "logs"),
+		DefaultShare:    defaults.Share.RepoPath,
+	}
+	manifest.Capabilities = []string{"metadata", "status", "doctor", "sync", "tap", "tui", "git-share", "sql", "markdown", "table-export"}
+	manifest.Privacy = control.Privacy{ContainsPrivateMessages: false, ExportsSecrets: false, LocalOnlyScopes: []string{"notion", "desktop-cache", "sqlite", "git-share"}}
+	manifest.Commands = map[string]control.Command{
+		"status":    {Title: "Status", Argv: []string{"notcrawl", "status", "--json"}, JSON: true},
+		"doctor":    {Title: "Doctor", Argv: []string{"notcrawl", "doctor", "--json"}, JSON: true},
+		"sync":      {Title: "Sync", Argv: []string{"notcrawl", "sync", "--source", "all"}, JSON: true, Mutates: true},
+		"tap":       {Title: "Import desktop cache", Argv: []string{"notcrawl", "sync", "--source", "desktop"}, JSON: true, Mutates: true},
+		"tui":       {Title: "Terminal browser", Argv: []string{"notcrawl", "tui"}},
+		"tui-json":  {Title: "Terminal browser rows", Argv: []string{"notcrawl", "tui", "--json"}, JSON: true},
+		"publish":   {Title: "Publish share", Argv: []string{"notcrawl", "publish"}, JSON: true, Mutates: true},
+		"subscribe": {Title: "Subscribe share", Argv: []string{"notcrawl", "subscribe"}, JSON: true, Mutates: true},
+		"update":    {Title: "Update share", Argv: []string{"notcrawl", "update"}, JSON: true, Mutates: true},
+		"export-md": {Title: "Export Markdown", Argv: []string{"notcrawl", "export-md"}, Mutates: true},
+		"databases": {Title: "List databases", Argv: []string{"notcrawl", "databases"}},
+		"export-db": {Title: "Export database", Argv: []string{"notcrawl", "export-db"}, Mutates: true},
+		"legacy-db": {Title: "Legacy database override", Argv: []string{"notcrawl", "--db"}, Legacy: true},
+	}
+	return writeJSON(stdout, manifest)
+}
+
+func writeJSON(stdout io.Writer, value any) error {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(value)
+}
+
+func controlStatus(cfg config.Config, status store.Status) control.Status {
+	counts := []control.Count{
+		control.NewCount("spaces", "Spaces", int64(status.Spaces)),
+		control.NewCount("users", "Users", int64(status.Users)),
+		control.NewCount("teams", "Teams", int64(status.Teams)),
+		control.NewCount("pages", "Pages", int64(status.Pages)),
+		control.NewCount("blocks", "Blocks", int64(status.Blocks)),
+		control.NewCount("collections", "Databases", int64(status.Collections)),
+		control.NewCount("comments", "Comments", int64(status.Comments)),
+		control.NewCount("raw_records", "Raw records", int64(status.RawRecords)),
+	}
+	out := control.NewStatus("notcrawl", fmt.Sprintf("%d pages and %d databases", status.Pages, status.Collections))
+	out.State = "current"
+	out.DatabasePath = status.DBPath
+	out.DatabaseBytes = status.DBBytes
+	out.WALBytes = status.WALBytes
+	out.Counts = counts
+	if status.LastSyncAt > 0 {
+		out.LastSyncAt = time.UnixMilli(status.LastSyncAt).UTC().Format(time.RFC3339)
+	}
+	out.Share = &control.Share{Enabled: cfg.Share.Remote != "" || cfg.Share.RepoPath != "", RepoPath: cfg.Share.RepoPath, Remote: cfg.Share.Remote, Branch: cfg.Share.Branch}
+	out.Databases = append(out.Databases, control.SQLiteDatabase("primary", "Notion archive", "archive", status.DBPath, true, counts))
+	out.Databases = append(out.Databases, desktopCacheDatabases(cfg.CacheDir)...)
+	return out
+}
+
+func desktopCacheDatabases(cacheDir string) []control.Database {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return nil
+	}
+	var out []control.Database
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			continue
+		}
+		path := filepath.Join(cacheDir, entry.Name())
+		out = append(out, control.SQLiteDatabase("cache-"+strings.TrimSuffix(entry.Name(), ".db"), entry.Name(), "desktop-cache", path, false, nil))
+	}
+	return out
 }
 
 func runReport(ctx context.Context, stdout io.Writer, cfg config.Config) error {
@@ -459,6 +589,7 @@ func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []str
 		EmptyMessage: "notcrawl has no local pages or databases yet",
 		Rows:         rows,
 		JSON:         *jsonOut,
+		Layout:       tui.LayoutDocument,
 		Stdout:       stdout,
 	})
 }
@@ -466,6 +597,9 @@ func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []str
 func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]tui.Row, error) {
 	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []tui.Row{}, nil
+		}
 		return nil, err
 	}
 	defer st.Close()
@@ -710,8 +844,11 @@ func printHelp(w io.Writer) {
 Global flags:
   --config PATH   config file path
   --db PATH       database path override
+  --version       print version and exit
 
 Commands:
+  metadata                  Print crawlkit control metadata
+  version                   Print version
   init                      Write a starter config
   doctor                    Check config, database, desktop cache, and token
   status                    Show archive counts and database size
@@ -720,6 +857,7 @@ Commands:
   sync --source desktop     Ingest Notion Desktop cache
   sync --source api         Ingest through the official Notion API
   sync --source all         Run enabled sources
+  tap                       Legacy-friendly alias for sync --source desktop
   export-md                 Render normalized Markdown from SQLite
   databases                 List crawled Notion databases
   export-db --database ID   Export a database as CSV or TSV
