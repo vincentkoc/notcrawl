@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/crawlkit/termkit"
+	"github.com/vincentkoc/crawlkit/tui"
 	"github.com/vincentkoc/notcrawl/internal/config"
 	"github.com/vincentkoc/notcrawl/internal/markdown"
 	"github.com/vincentkoc/notcrawl/internal/notionapi"
@@ -459,12 +459,12 @@ func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []str
 		enc.SetIndent("", "  ")
 		return enc.Encode(items)
 	}
-	if err := termkit.Run(ctx, termkit.Options{
+	if err := tui.Run(ctx, tui.Options{
 		Title:        "notcrawl archive",
 		EmptyMessage: "notcrawl has no local pages or databases yet",
 		Items:        items,
 	}); err != nil {
-		if errors.Is(err, termkit.ErrNotTerminal) {
+		if errors.Is(err, tui.ErrNotTerminal) {
 			return fmt.Errorf("%w; run notcrawl tui from a TTY or pass --json", err)
 		}
 		return err
@@ -472,13 +472,13 @@ func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []str
 	return nil
 }
 
-func tuiItems(ctx context.Context, cfg config.Config, kind string, limit int) ([]termkit.Item, error) {
+func tuiItems(ctx context.Context, cfg config.Config, kind string, limit int) ([]tui.Item, error) {
 	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return nil, err
 	}
 	defer st.Close()
-	var items []termkit.Item
+	var items []tui.Item
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "", "all":
 		pages, err := st.Pages(ctx)
@@ -511,17 +511,17 @@ func tuiItems(ctx context.Context, cfg config.Config, kind string, limit int) ([
 	return items, nil
 }
 
-func pageTUIItems(pages []store.Page, limit int) []termkit.Item {
+func pageTUIItems(pages []store.Page, limit int) []tui.Item {
 	if limit > len(pages) {
 		limit = len(pages)
 	}
-	items := make([]termkit.Item, 0, limit)
+	items := make([]tui.Item, 0, limit)
 	for _, page := range pages[:limit] {
 		title := strings.TrimSpace(page.Title)
 		if title == "" {
 			title = page.ID
 		}
-		items = append(items, termkit.Item{
+		items = append(items, tui.Item{
 			Title:    title,
 			Subtitle: strings.TrimSpace(strings.Join([]string{"page", page.Source, formatMillis(page.LastEditedTime)}, " ")),
 			Detail:   strings.TrimSpace(strings.Join([]string{page.URL, "id=" + page.ID, "parent=" + page.ParentTable + ":" + page.ParentID, "collection=" + page.CollectionID}, "\n")),
@@ -531,17 +531,17 @@ func pageTUIItems(pages []store.Page, limit int) []termkit.Item {
 	return items
 }
 
-func collectionTUIItems(collections []store.Collection, limit int) []termkit.Item {
+func collectionTUIItems(collections []store.Collection, limit int) []tui.Item {
 	if limit > len(collections) {
 		limit = len(collections)
 	}
-	items := make([]termkit.Item, 0, limit)
+	items := make([]tui.Item, 0, limit)
 	for _, collection := range collections[:limit] {
 		title := strings.TrimSpace(collection.Name)
 		if title == "" {
 			title = collection.ID
 		}
-		items = append(items, termkit.Item{
+		items = append(items, tui.Item{
 			Title:    title,
 			Subtitle: strings.TrimSpace(strings.Join([]string{"database", collection.Source}, " ")),
 			Detail:   strings.TrimSpace(strings.Join([]string{"id=" + collection.ID, "parent=" + collection.ParentTable + ":" + collection.ParentID}, "\n")),

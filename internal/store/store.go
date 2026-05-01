@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/crawlkit/sqlitekit"
+	crawlstore "github.com/vincentkoc/crawlkit/store"
 )
 
 const schemaVersion = 1
@@ -24,7 +24,7 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	base, err := sqlitekit.Open(context.Background(), sqlitekit.Options{Path: path})
+	base, err := crawlstore.Open(context.Background(), crawlstore.Options{Path: path})
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func Open(path string) (*Store, error) {
 }
 
 func OpenReadOnly(path string) (*Store, error) {
-	base, err := sqlitekit.OpenReadOnly(context.Background(), path)
+	base, err := crawlstore.OpenReadOnly(context.Background(), path)
 	if err != nil {
 		return nil, err
 	}

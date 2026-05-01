@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vincentkoc/crawlkit/gitshare"
+	"github.com/vincentkoc/crawlkit/mirror"
 	"github.com/vincentkoc/notcrawl/internal/store"
 )
 
@@ -118,14 +118,14 @@ func Publish(ctx context.Context, st *store.Store, opts PublishOptions) (Publish
 	}
 	s := PublishSummary{Manifest: manifest}
 	if opts.Commit {
-		committed, err := gitshare.Commit(ctx, gitshare.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}, opts.Message)
+		committed, err := mirror.Commit(ctx, mirror.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}, opts.Message)
 		if err != nil {
 			return s, err
 		}
 		s.Committed = committed
 	}
 	if opts.Push {
-		if err := gitshare.Push(ctx, gitshare.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}); err != nil {
+		if err := mirror.Push(ctx, mirror.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}); err != nil {
 			return s, err
 		}
 		s.Pushed = true
@@ -160,7 +160,7 @@ func Subscribe(ctx context.Context, st *store.Store, remote, repoPath, branch st
 	if branch == "" {
 		branch = "main"
 	}
-	if err := gitshare.Pull(ctx, gitshare.Options{RepoPath: repoPath, Remote: remote, Branch: branch}); err != nil {
+	if err := mirror.Pull(ctx, mirror.Options{RepoPath: repoPath, Remote: remote, Branch: branch}); err != nil {
 		return Manifest{}, err
 	}
 	return Import(ctx, st, repoPath)
@@ -170,7 +170,7 @@ func Update(ctx context.Context, st *store.Store, repoPath, branch string) (Mani
 	if branch == "" {
 		branch = "main"
 	}
-	if err := gitshare.Pull(ctx, gitshare.Options{RepoPath: repoPath, Branch: branch}); err != nil {
+	if err := mirror.Pull(ctx, mirror.Options{RepoPath: repoPath, Branch: branch}); err != nil {
 		return Manifest{}, err
 	}
 	return Import(ctx, st, repoPath)
@@ -268,11 +268,11 @@ func importTable(ctx context.Context, db *sql.DB, path, table string) error {
 }
 
 func ensureRepo(ctx context.Context, repoPath, remote, branch string) error {
-	return gitshare.EnsureRepo(ctx, gitshare.Options{RepoPath: repoPath, Remote: remote, Branch: branch})
+	return mirror.EnsureRepo(ctx, mirror.Options{RepoPath: repoPath, Remote: remote, Branch: branch})
 }
 
 func hasChanges(ctx context.Context, repoPath string) (bool, error) {
-	return gitshare.Dirty(ctx, gitshare.Options{RepoPath: repoPath})
+	return mirror.Dirty(ctx, mirror.Options{RepoPath: repoPath})
 }
 
 func runGit(ctx context.Context, dir string, args ...string) error {

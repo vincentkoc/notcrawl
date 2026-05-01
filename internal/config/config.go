@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vincentkoc/crawlkit/configkit"
+	crawlconfig "github.com/vincentkoc/crawlkit/config"
 )
 
 const (
@@ -49,13 +49,13 @@ type ShareConfig struct {
 	StaleAfter string `toml:"stale_after"`
 }
 
-var appConfig = configkit.App{Name: "notcrawl", BaseDir: "~/" + defaultDirName, LegacyBaseDir: "~/" + defaultDirName}
+var appConfig = crawlconfig.App{Name: "notcrawl", BaseDir: "~/" + defaultDirName, LegacyBaseDir: "~/" + defaultDirName}
 
 func Default() Config {
 	paths, err := appConfig.DefaultPaths()
 	if err != nil {
 		base := filepath.ToSlash(filepath.Join("~", defaultDirName))
-		paths = configkit.Paths{
+		paths = crawlconfig.Paths{
 			DBPath:   filepath.ToSlash(filepath.Join(base, "notcrawl.db")),
 			CacheDir: filepath.ToSlash(filepath.Join(base, "cache")),
 			ShareDir: filepath.ToSlash(filepath.Join(base, "share")),
@@ -100,7 +100,7 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	cfg := Default()
-	if err := configkit.LoadTOML(path, &cfg); err != nil {
+	if err := crawlconfig.LoadTOML(path, &cfg); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if err := cfg.Resolve(); err != nil {
 				return Config{}, err
@@ -136,7 +136,7 @@ func WriteStarter(path string) (string, error) {
 		return "", err
 	}
 	cfg := Default()
-	return path, configkit.WriteTOML(path, cfg, 0o600)
+	return path, crawlconfig.WriteTOML(path, cfg, 0o600)
 }
 
 func (c *Config) Resolve() error {
@@ -176,7 +176,7 @@ func ExpandPath(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	return filepath.Abs(configkit.ExpandHome(path))
+	return filepath.Abs(crawlconfig.ExpandHome(path))
 }
 
 func (c Config) APIToken() string {
