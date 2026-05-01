@@ -6,12 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/vincentkoc/crawlkit/sqlitekit"
 )
 
 const schemaVersion = 1
@@ -25,64 +24,21 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	if err := ensureDBFile(path); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
+	base, err := sqlitekit.Open(context.Background(), sqlitekit.Options{Path: path})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db := base.DB()
 	if err := db.PingContext(context.Background()); err != nil {
-		_ = db.Close()
+		_ = base.Close()
 		return nil, err
 	}
 	st := &Store{db: db, path: path}
 	if err := st.init(context.Background()); err != nil {
-		_ = db.Close()
+		_ = base.Close()
 		return nil, err
 	}
 	return st, nil
-}
-
-func sqliteDSN(path string) string {
-	pragmas := "_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY)&_pragma=mmap_size(268435456)&_pragma=busy_timeout(5000)"
-	if path == ":memory:" {
-		return "file::memory:?cache=shared&" + pragmas
-	}
-	if strings.HasPrefix(path, "file:") {
-		sep := "?"
-		if strings.Contains(path, "?") {
-			sep = "&"
-		}
-		return path + sep + pragmas
-	}
-	return "file:" + path + "?" + pragmas
-}
-
-func ensureDBFile(path string) error {
-	if path == ":memory:" || strings.HasPrefix(path, "file:") {
-		return nil
-	}
-	if _, err := os.Stat(path); err == nil {
-		return os.Chmod(path, 0o600)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil && !errors.Is(err, os.ErrExist) {
-		return err
-	}
-	if file != nil {
-		if err := file.Close(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Store) DB() *sql.DB {
