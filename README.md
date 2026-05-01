@@ -25,6 +25,7 @@ to without holding Notion credentials.
 - normalized Markdown export organized by Unicode-safe workspace, teamspace, and page paths
 - CSV/TSV export for crawled Notion database rows
 - compressed JSONL git-share snapshots plus import/update workflows
+- terminal archive browser for quick local page/database inspection
 - archive status, activity reporting, and SQLite maintenance commands
 - read-only SQL access for ad hoc inspection
 
@@ -50,6 +51,7 @@ notcrawl report
 notcrawl sync --source desktop
 notcrawl export-md
 notcrawl search "launch plan"
+notcrawl tui
 ```
 
 Or use the official Notion API:
@@ -82,6 +84,7 @@ Default paths:
 - `databases` lists crawled Notion databases
 - `export-db` exports one crawled Notion database, or all databases with `--all --dir`, to CSV or TSV
 - `search` searches page and comment text through FTS5
+- `tui` opens the terminal archive browser for pages and databases
 - `sql` runs read-only SQL against the archive
 - `publish` exports SQLite tables and Markdown into a git share repo
 - `subscribe` clones a share repo and imports the latest snapshot
