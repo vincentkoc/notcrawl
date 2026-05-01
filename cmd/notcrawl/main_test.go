@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,69 @@ func TestSearchFieldCollapsesRecordSeparators(t *testing.T) {
 	got := searchField("line one\nline\ttwo  line three")
 	if got != "line one line two line three" {
 		t.Fatalf("unexpected field: %q", got)
+	}
+}
+
+func TestTUIJSONListsArchiveRowsWithoutMutation(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "notcrawl.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := store.NowMS()
+	if err := st.UpsertCollection(ctx, store.Collection{ID: "db1", Name: "Roadmap", Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertPage(ctx, store.Page{
+		ID:             "page1",
+		CollectionID:   "db1",
+		Title:          "Launch Plan",
+		URL:            "https://example.com/launch",
+		Alive:          true,
+		Source:         "test",
+		SyncedAt:       now,
+		LastEditedTime: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = run(ctx, []string{"--config", filepath.Join(dir, "missing.toml"), "--db", dbPath, "tui", "--json"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("tui --json failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
+	}
+	if len(rows) == 0 || rows[0]["title"] != "Launch Plan" {
+		t.Fatalf("unexpected rows: %#v", rows)
+	}
+	after, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("tui --json mutated the sqlite database")
+	}
+}
+
+func TestHelpMentionsTUI(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "tui") {
+		t.Fatalf("help missing tui command:\n%s", stdout.String())
 	}
 }
 
