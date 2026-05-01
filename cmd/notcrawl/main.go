@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -450,102 +449,111 @@ func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []str
 	if *limit <= 0 {
 		return fmt.Errorf("tui --limit must be positive")
 	}
-	items, err := tuiItems(ctx, cfg, *kind, *limit)
+	rows, err := tuiRows(ctx, cfg, *kind, *limit)
 	if err != nil {
 		return err
 	}
-	if *jsonOut {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(items)
-	}
-	if err := tui.Run(ctx, tui.Options{
+	return tui.Browse(ctx, tui.BrowseOptions{
+		AppName:      "notcrawl",
 		Title:        "notcrawl archive",
 		EmptyMessage: "notcrawl has no local pages or databases yet",
-		Items:        items,
-	}); err != nil {
-		if errors.Is(err, tui.ErrNotTerminal) {
-			return fmt.Errorf("%w; run notcrawl tui from a TTY or pass --json", err)
-		}
-		return err
-	}
-	return nil
+		Rows:         rows,
+		JSON:         *jsonOut,
+		Stdout:       stdout,
+	})
 }
 
-func tuiItems(ctx context.Context, cfg config.Config, kind string, limit int) ([]tui.Item, error) {
+func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]tui.Row, error) {
 	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
 		return nil, err
 	}
 	defer st.Close()
-	var items []tui.Item
+	var rows []tui.Row
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "", "all":
 		pages, err := st.Pages(ctx)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, pageTUIItems(pages, limit)...)
-		if len(items) < limit {
+		rows = append(rows, pageTUIRows(pages, limit)...)
+		if len(rows) < limit {
 			collections, err := st.Collections(ctx)
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, collectionTUIItems(collections, limit-len(items))...)
+			rows = append(rows, collectionTUIRows(collections, limit-len(rows))...)
 		}
 	case "pages", "page":
 		pages, err := st.Pages(ctx)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, pageTUIItems(pages, limit)...)
+		rows = append(rows, pageTUIRows(pages, limit)...)
 	case "databases", "database", "collections", "collection":
 		collections, err := st.Collections(ctx)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, collectionTUIItems(collections, limit)...)
+		rows = append(rows, collectionTUIRows(collections, limit)...)
 	default:
 		return nil, fmt.Errorf("unknown tui kind %q", kind)
 	}
-	return items, nil
+	return rows, nil
 }
 
-func pageTUIItems(pages []store.Page, limit int) []tui.Item {
+func pageTUIRows(pages []store.Page, limit int) []tui.Row {
 	if limit > len(pages) {
 		limit = len(pages)
 	}
-	items := make([]tui.Item, 0, limit)
+	items := make([]tui.Row, 0, limit)
 	for _, page := range pages[:limit] {
 		title := strings.TrimSpace(page.Title)
 		if title == "" {
 			title = page.ID
 		}
-		items = append(items, tui.Item{
-			Title:    title,
-			Subtitle: strings.TrimSpace(strings.Join([]string{"page", page.Source, formatMillis(page.LastEditedTime)}, " ")),
-			Detail:   strings.TrimSpace(strings.Join([]string{page.URL, "id=" + page.ID, "parent=" + page.ParentTable + ":" + page.ParentID, "collection=" + page.CollectionID}, "\n")),
-			Tags:     []string{"page", page.Source},
+		items = append(items, tui.Row{
+			Source:    "notion",
+			Kind:      "page",
+			ID:        page.ID,
+			ParentID:  strings.Trim(page.ParentTable+":"+page.ParentID, ":"),
+			Scope:     page.SpaceID,
+			Container: page.CollectionID,
+			Title:     title,
+			URL:       page.URL,
+			UpdatedAt: formatMillis(page.LastEditedTime),
+			Tags:      []string{page.Source},
+			Fields: map[string]string{
+				"parent_table": page.ParentTable,
+				"source":       page.Source,
+			},
 		})
 	}
 	return items
 }
 
-func collectionTUIItems(collections []store.Collection, limit int) []tui.Item {
+func collectionTUIRows(collections []store.Collection, limit int) []tui.Row {
 	if limit > len(collections) {
 		limit = len(collections)
 	}
-	items := make([]tui.Item, 0, limit)
+	items := make([]tui.Row, 0, limit)
 	for _, collection := range collections[:limit] {
 		title := strings.TrimSpace(collection.Name)
 		if title == "" {
 			title = collection.ID
 		}
-		items = append(items, tui.Item{
+		items = append(items, tui.Row{
+			Source:   "notion",
+			Kind:     "database",
+			ID:       collection.ID,
+			ParentID: strings.Trim(collection.ParentTable+":"+collection.ParentID, ":"),
+			Scope:    collection.SpaceID,
 			Title:    title,
-			Subtitle: strings.TrimSpace(strings.Join([]string{"database", collection.Source}, " ")),
-			Detail:   strings.TrimSpace(strings.Join([]string{"id=" + collection.ID, "parent=" + collection.ParentTable + ":" + collection.ParentID}, "\n")),
-			Tags:     []string{"database", collection.Source},
+			Tags:     []string{collection.Source},
+			Fields: map[string]string{
+				"parent_table": collection.ParentTable,
+				"source":       collection.Source,
+			},
 		})
 	}
 	return items

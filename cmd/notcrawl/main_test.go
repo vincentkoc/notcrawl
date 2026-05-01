@@ -60,7 +60,7 @@ func TestTUIJSONListsArchiveRowsWithoutMutation(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
 	}
-	if len(rows) == 0 || rows[0]["title"] != "Launch Plan" {
+	if len(rows) == 0 || rows[0]["title"] != "Launch Plan" || rows[0]["source"] != "notion" || rows[0]["kind"] != "page" || rows[0]["container"] != "db1" {
 		t.Fatalf("unexpected rows: %#v", rows)
 	}
 	after, err := os.ReadFile(dbPath)
