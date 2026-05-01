@@ -31,12 +31,20 @@ jobs:
         run: go test ./...
 
       - name: Build CLI
-        run: go build ./cmd/notcrawl
+        run: go build -o bin/notcrawl ./cmd/notcrawl
 
-      - name: Smoke test CLI help
+      - name: Smoke test CLI control surface
         run: |
           set -euo pipefail
-          output="$(go run ./cmd/notcrawl --help 2>&1)"
+          output="$(./bin/notcrawl --help 2>&1)"
           printf '%s\n' "$output"
           printf '%s' "$output" | grep -q "Usage of notcrawl:"
+          printf '%s' "$output" | grep -q "metadata"
           printf '%s' "$output" | grep -q "tui"
+          test -n "$(./bin/notcrawl --version)"
+          ./bin/notcrawl metadata --json | grep -q '"schema_version"'
+          cfg="$RUNNER_TEMP/notcrawl.toml"
+          db="$RUNNER_TEMP/notcrawl.db"
+          ./bin/notcrawl --config "$cfg" init
+          ./bin/notcrawl --config "$cfg" --db "$db" status --json | grep -q '"databases"'
+          ./bin/notcrawl --config "$cfg" --db "$db" tui --json --limit 1 | grep -q '^\['
