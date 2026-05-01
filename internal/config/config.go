@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
+	"github.com/vincentkoc/crawlkit/configkit"
 )
 
 const (
@@ -49,12 +49,22 @@ type ShareConfig struct {
 	StaleAfter string `toml:"stale_after"`
 }
 
+var appConfig = configkit.App{Name: "notcrawl", BaseDir: "~/" + defaultDirName, LegacyBaseDir: "~/" + defaultDirName}
+
 func Default() Config {
-	base := filepath.ToSlash(filepath.Join("~", defaultDirName))
+	paths, err := appConfig.DefaultPaths()
+	if err != nil {
+		base := filepath.ToSlash(filepath.Join("~", defaultDirName))
+		paths = configkit.Paths{
+			DBPath:   filepath.ToSlash(filepath.Join(base, "notcrawl.db")),
+			CacheDir: filepath.ToSlash(filepath.Join(base, "cache")),
+			ShareDir: filepath.ToSlash(filepath.Join(base, "share")),
+		}
+	}
 	return Config{
-		DBPath:      filepath.ToSlash(filepath.Join(base, "notcrawl.db")),
-		CacheDir:    filepath.ToSlash(filepath.Join(base, "cache")),
-		MarkdownDir: filepath.ToSlash(filepath.Join(base, "pages")),
+		DBPath:      filepath.ToSlash(paths.DBPath),
+		CacheDir:    filepath.ToSlash(paths.CacheDir),
+		MarkdownDir: filepath.ToSlash(filepath.Join(paths.BaseDir, "pages")),
 		Notion: NotionConfig{
 			Desktop: DesktopConfig{Enabled: true, Path: ""},
 			API: APIConfig{
@@ -66,18 +76,15 @@ func Default() Config {
 		},
 		Share: ShareConfig{
 			Branch:     "main",
-			RepoPath:   filepath.ToSlash(filepath.Join(base, "share")),
+			RepoPath:   filepath.ToSlash(paths.ShareDir),
 			StaleAfter: "1h",
 		},
 	}
 }
 
 func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, defaultDirName, "config.toml"), nil
+	paths, err := appConfig.DefaultPaths()
+	return paths.ConfigPath, err
 }
 
 func Load(path string) (Config, error) {
@@ -93,8 +100,7 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	cfg := Default()
-	b, err := os.ReadFile(path)
-	if err != nil {
+	if err := configkit.LoadTOML(path, &cfg); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if err := cfg.Resolve(); err != nil {
 				return Config{}, err
@@ -102,9 +108,6 @@ func Load(path string) (Config, error) {
 			return cfg, nil
 		}
 		return Config{}, err
-	}
-	if err := toml.Unmarshal(b, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 	if err := cfg.Resolve(); err != nil {
 		return Config{}, err
@@ -133,11 +136,7 @@ func WriteStarter(path string) (string, error) {
 		return "", err
 	}
 	cfg := Default()
-	b, err := toml.Marshal(cfg)
-	if err != nil {
-		return "", err
-	}
-	return path, os.WriteFile(path, b, 0o600)
+	return path, configkit.WriteTOML(path, cfg, 0o600)
 }
 
 func (c *Config) Resolve() error {
@@ -177,17 +176,7 @@ func ExpandPath(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		if path == "~" {
-			return home, nil
-		}
-		return filepath.Join(home, path[2:]), nil
-	}
-	return filepath.Abs(path)
+	return filepath.Abs(configkit.ExpandHome(path))
 }
 
 func (c Config) APIToken() string {
