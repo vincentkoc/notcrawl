@@ -82,6 +82,20 @@ func TestHelpMentionsTUI(t *testing.T) {
 	}
 }
 
+func TestTUIHelpReturnsUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run(context.Background(), []string{"tui", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Usage of tui:") || !strings.Contains(stdout.String(), "-limit") {
+		t.Fatalf("tui help missing usage:\n%s", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr:\n%s", stderr.String())
+	}
+}
+
 func TestExportDatabaseAllWritesFilesAndIndex(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

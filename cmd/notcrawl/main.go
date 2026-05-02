@@ -73,6 +73,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "wrote %s\n", path)
 		return nil
 	}
+	if cmd == "tui" && hasHelpArg(cmdArgs) {
+		return printTUIUsage(stdout)
+	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
@@ -567,10 +570,21 @@ func runSearch(ctx context.Context, stdout io.Writer, cfg config.Config, args []
 
 func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if hasHelpArg(args) {
+		fs.SetOutput(stdout)
+	}
 	limit := fs.Int("limit", 200, "maximum rows to load")
 	kind := fs.String("kind", "all", "rows to browse: all, pages, databases")
 	jsonOut := fs.Bool("json", false, "print browser rows as JSON instead of opening the terminal UI")
+	if len(args) == 1 && args[0] == "help" {
+		fs.Usage()
+		return nil
+	}
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -846,6 +860,25 @@ func printRows(w io.Writer, rows *sql.Rows) error {
 		fmt.Fprintln(w)
 	}
 	return rows.Err()
+}
+
+func hasHelpArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "help" || arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+func printTUIUsage(stdout io.Writer) error {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	fs.Int("limit", 200, "maximum rows to load")
+	fs.String("kind", "all", "rows to browse: all, pages, databases")
+	fs.Bool("json", false, "print browser rows as JSON instead of opening the terminal UI")
+	fs.Usage()
+	return nil
 }
 
 func isReadOnlyQuery(query string) bool {
