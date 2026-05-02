@@ -73,7 +73,7 @@ jobs:
             depends_on "go" => :build
 
             def install
-              system "go", "build", *std_go_args(ldflags: "-s -w"), "./cmd/notcrawl"
+              system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=#{version}"), "./cmd/notcrawl"
               pkgshare.install "config.example.toml"
               doc.install "README.md", "LICENSE", "SPEC.md"
             end

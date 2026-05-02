@@ -31,7 +31,7 @@ jobs:
         run: go test ./...
 
       - name: Build CLI
-        run: go build -o bin/notcrawl ./cmd/notcrawl
+        run: go build -ldflags "-X main.version=ci" -o bin/notcrawl ./cmd/notcrawl
 
       - name: Smoke test CLI control surface
         run: |
@@ -41,7 +41,7 @@ jobs:
           printf '%s' "$output" | grep -q "Usage of notcrawl:"
           printf '%s' "$output" | grep -q "metadata"
           printf '%s' "$output" | grep -q "tui"
-          test -n "$(./bin/notcrawl --version)"
+          test "$(./bin/notcrawl --version)" = "ci"
           ./bin/notcrawl metadata --json | grep -q '"schema_version"'
           cfg="$RUNNER_TEMP/notcrawl.toml"
           db="$RUNNER_TEMP/notcrawl.db"
