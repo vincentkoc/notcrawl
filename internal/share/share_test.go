@@ -3,7 +3,9 @@ package share
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vincentkoc/notcrawl/internal/markdown"
@@ -83,4 +85,44 @@ func TestPublishAndImportSnapshot(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected imported search result, got %d", len(results))
 	}
+}
+
+func TestEnsureRepoUpdatesExistingOrigin(t *testing.T) {
+	ctx := context.Background()
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repo, "init")
+	runGitForTest(t, repo, "remote", "add", "origin", "https://example.invalid/old.git")
+
+	const remote = "https://example.invalid/fresh.git"
+	if err := ensureRepo(ctx, repo, remote, "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := gitOutputForTest(t, repo, "remote", "get-url", "origin")
+	if strings.TrimSpace(got) != remote {
+		t.Fatalf("origin = %q", got)
+	}
+}
+
+func runGitForTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+}
+
+func gitOutputForTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return string(out)
 }

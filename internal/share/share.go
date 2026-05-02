@@ -268,7 +268,20 @@ func importTable(ctx context.Context, db *sql.DB, path, table string) error {
 }
 
 func ensureRepo(ctx context.Context, repoPath, remote, branch string) error {
-	return mirror.EnsureRepo(ctx, mirror.Options{RepoPath: repoPath, Remote: remote, Branch: branch})
+	if err := mirror.EnsureRepo(ctx, mirror.Options{RepoPath: repoPath, Remote: remote, Branch: branch}); err != nil {
+		return err
+	}
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return nil
+	}
+	if err := runGit(ctx, repoPath, "remote", "set-url", "origin", remote); err != nil {
+		if strings.Contains(err.Error(), "No such remote") {
+			return runGit(ctx, repoPath, "remote", "add", "origin", remote)
+		}
+		return err
+	}
+	return nil
 }
 
 func hasChanges(ctx context.Context, repoPath string) (bool, error) {
