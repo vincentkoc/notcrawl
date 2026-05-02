@@ -348,7 +348,14 @@ func maxSlug(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	s = strings.TrimRight(s[:max], "-")
+	cut := 0
+	for i := range s {
+		if i > max {
+			break
+		}
+		cut = i
+	}
+	s = strings.TrimRight(s[:cut], "-")
 	if s == "" {
 		return "untitled"
 	}
