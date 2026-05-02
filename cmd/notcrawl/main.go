@@ -584,14 +584,30 @@ func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []str
 		return err
 	}
 	return tui.Browse(ctx, tui.BrowseOptions{
-		AppName:      "notcrawl",
-		Title:        "notcrawl archive",
-		EmptyMessage: "notcrawl has no local pages or databases yet",
-		Rows:         rows,
-		JSON:         *jsonOut,
-		Layout:       tui.LayoutDocument,
-		Stdout:       stdout,
+		AppName:        "notcrawl",
+		Title:          "notcrawl archive",
+		EmptyMessage:   "notcrawl has no local pages or databases yet",
+		Rows:           rows,
+		JSON:           *jsonOut,
+		Layout:         tui.LayoutDocument,
+		SourceKind:     archiveSourceKind(cfg),
+		SourceLocation: archiveSourceLocation(cfg),
+		Stdout:         stdout,
 	})
+}
+
+func archiveSourceKind(cfg config.Config) string {
+	if strings.TrimSpace(cfg.Share.Remote) != "" {
+		return tui.SourceRemote
+	}
+	return tui.SourceLocal
+}
+
+func archiveSourceLocation(cfg config.Config) string {
+	if strings.TrimSpace(cfg.Share.Remote) != "" {
+		return cfg.Share.Remote
+	}
+	return cfg.DBPath
 }
 
 func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]tui.Row, error) {
