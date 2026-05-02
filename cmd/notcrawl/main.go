@@ -633,6 +633,13 @@ func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]
 		return nil, err
 	}
 	defer st.Close()
+	pageTitles, _ := st.PageTitles(ctx)
+	spaceNames, _ := st.SpaceNames(ctx)
+	collections, err := st.Collections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	collectionNames := collectionNameMap(collections)
 	var rows []tui.Row
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "", "all":
@@ -640,33 +647,25 @@ func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, pageTUIRows(pages, limit)...)
+		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames)...)
 		if len(rows) < limit {
-			collections, err := st.Collections(ctx)
-			if err != nil {
-				return nil, err
-			}
-			rows = append(rows, collectionTUIRows(collections, limit-len(rows))...)
+			rows = append(rows, collectionTUIRows(collections, limit-len(rows), pageTitles, spaceNames)...)
 		}
 	case "pages", "page":
 		pages, err := st.Pages(ctx)
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, pageTUIRows(pages, limit)...)
+		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames)...)
 	case "databases", "database", "collections", "collection":
-		collections, err := st.Collections(ctx)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, collectionTUIRows(collections, limit)...)
+		rows = append(rows, collectionTUIRows(collections, limit, pageTitles, spaceNames)...)
 	default:
 		return nil, fmt.Errorf("unknown tui kind %q", kind)
 	}
 	return rows, nil
 }
 
-func pageTUIRows(pages []store.Page, limit int) []tui.Row {
+func pageTUIRows(pages []store.Page, limit int, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string) []tui.Row {
 	if limit > len(pages) {
 		limit = len(pages)
 	}
@@ -680,23 +679,27 @@ func pageTUIRows(pages []store.Page, limit int) []tui.Row {
 			Source:    "notion",
 			Kind:      "page",
 			ID:        page.ID,
-			ParentID:  strings.Trim(page.ParentTable+":"+page.ParentID, ":"),
-			Scope:     page.SpaceID,
-			Container: page.CollectionID,
+			ParentID:  notionParentLabel(page.ParentTable, page.ParentID, pageTitles, collectionNames),
+			Scope:     firstNonEmpty(spaceNames[page.SpaceID], page.SpaceID),
+			Container: firstNonEmpty(collectionNames[page.CollectionID], page.CollectionID),
 			Title:     title,
 			URL:       page.URL,
+			CreatedAt: formatMillis(page.CreatedTime),
 			UpdatedAt: formatMillis(page.LastEditedTime),
 			Tags:      []string{page.Source},
 			Fields: map[string]string{
-				"parent_table": page.ParentTable,
-				"source":       page.Source,
+				"collection_id": page.CollectionID,
+				"parent_id":     page.ParentID,
+				"parent_table":  page.ParentTable,
+				"source":        page.Source,
+				"space_id":      page.SpaceID,
 			},
 		})
 	}
 	return items
 }
 
-func collectionTUIRows(collections []store.Collection, limit int) []tui.Row {
+func collectionTUIRows(collections []store.Collection, limit int, pageTitles map[string]string, spaceNames map[string]string) []tui.Row {
 	if limit > len(collections) {
 		limit = len(collections)
 	}
@@ -707,20 +710,60 @@ func collectionTUIRows(collections []store.Collection, limit int) []tui.Row {
 			title = collection.ID
 		}
 		items = append(items, tui.Row{
-			Source:   "notion",
-			Kind:     "database",
-			ID:       collection.ID,
-			ParentID: strings.Trim(collection.ParentTable+":"+collection.ParentID, ":"),
-			Scope:    collection.SpaceID,
-			Title:    title,
-			Tags:     []string{collection.Source},
+			Source:    "notion",
+			Kind:      "database",
+			ID:        collection.ID,
+			ParentID:  notionParentLabel(collection.ParentTable, collection.ParentID, pageTitles, nil),
+			Scope:     firstNonEmpty(spaceNames[collection.SpaceID], collection.SpaceID),
+			Title:     title,
+			UpdatedAt: formatMillis(collection.SyncedAt),
+			Tags:      []string{collection.Source},
 			Fields: map[string]string{
+				"parent_id":    collection.ParentID,
 				"parent_table": collection.ParentTable,
 				"source":       collection.Source,
+				"space_id":     collection.SpaceID,
 			},
 		})
 	}
 	return items
+}
+
+func collectionNameMap(collections []store.Collection) map[string]string {
+	out := make(map[string]string, len(collections))
+	for _, collection := range collections {
+		name := strings.TrimSpace(collection.Name)
+		if name == "" {
+			name = collection.ID
+		}
+		out[collection.ID] = name
+	}
+	return out
+}
+
+func notionParentLabel(parentTable, parentID string, pageTitles map[string]string, collectionNames map[string]string) string {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return ""
+	}
+	switch strings.TrimSpace(parentTable) {
+	case "page", "block":
+		return firstNonEmpty(pageTitles[parentID], parentID)
+	case "collection", "database", "data_source":
+		if collectionNames != nil {
+			return firstNonEmpty(collectionNames[parentID], parentID)
+		}
+	}
+	return strings.Trim(parentTable+":"+parentID, ":")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func formatMillis(ms int64) string {
