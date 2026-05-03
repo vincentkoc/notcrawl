@@ -118,6 +118,25 @@ func TestMetadataDoesNotMarkPlainTextCommandsAsJSON(t *testing.T) {
 	}
 }
 
+func TestSyncEmitsProgressPercentToStderr(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{
+		"--config", filepath.Join(dir, "missing.toml"),
+		"--db", filepath.Join(dir, "notcrawl.db"),
+		"sync", "--source", "desktop",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("sync failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	logs := stderr.String()
+	for _, want := range []string{`msg="sync progress"`, `state=finished`, `percent=100.0`, `completion=100.0%`, `phase=desktop`} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("missing %q in progress logs:\n%s", want, logs)
+		}
+	}
+}
+
 func TestTUIHelpReturnsUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

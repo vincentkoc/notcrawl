@@ -8,12 +8,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/vincentkoc/crawlkit/control"
+	"github.com/vincentkoc/crawlkit/progress"
 	"github.com/vincentkoc/crawlkit/tui"
 	"github.com/vincentkoc/notcrawl/internal/config"
 	"github.com/vincentkoc/notcrawl/internal/markdown"
@@ -97,9 +99,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "maintain":
 		return runMaintain(ctx, stdout, cfg, cmdArgs)
 	case "sync":
-		return runSync(ctx, stdout, cfg, cmdArgs)
+		return runSync(ctx, stdout, stderr, cfg, cmdArgs)
 	case "tap":
-		return runSync(ctx, stdout, cfg, []string{"--source", "desktop"})
+		return runSync(ctx, stdout, stderr, cfg, []string{"--source", "desktop"})
 	case "export-md":
 		return runExportMarkdown(ctx, stdout, cfg)
 	case "databases":
@@ -329,7 +331,7 @@ func runMaintain(ctx context.Context, stdout io.Writer, cfg config.Config, args 
 	return nil
 }
 
-func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+func runSync(ctx context.Context, stdout, stderr io.Writer, cfg config.Config, args []string) (err error) {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	source := fs.String("source", "all", "source: desktop, api, all")
 	if err := fs.Parse(args); err != nil {
@@ -340,12 +342,26 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 		return err
 	}
 	defer st.Close()
+	tracker := progress.New(progressLogger(stderr), progress.Options{
+		Name:  "sync",
+		Unit:  "stages",
+		Total: int64(syncStageTotal(*source, cfg)),
+		Attrs: []any{"source", *source},
+	})
+	completed := int64(0)
+	defer func() {
+		if tracker != nil {
+			tracker.Finish(err)
+		}
+	}()
 	switch *source {
 	case "desktop":
 		s, err := notiondesktop.Ingest(ctx, st, cfg.Notion.Desktop.Path, cfg.CacheDir)
 		if err != nil {
 			return err
 		}
+		completed++
+		tracker.Set(completed, "phase", "desktop", "pages", s.Pages, "blocks", s.Blocks, "collections", s.Collections)
 		fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d teams=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Teams, s.Collections, s.Comments, s.Source.Snapshot)
 	case "api":
 		s, err := notionapi.Client{
@@ -356,6 +372,8 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
+		completed++
+		tracker.Set(completed, "phase", "api", "pages", s.Pages, "databases", s.Databases, "blocks", s.Blocks)
 		fmt.Fprintf(stdout, "api: users=%d pages=%d databases=%d database_rows=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Databases, s.DatabaseRows, s.Blocks, s.Comments)
 	case "all":
 		if cfg.Notion.Desktop.Enabled {
@@ -363,6 +381,8 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 			if err != nil {
 				return err
 			}
+			completed++
+			tracker.Set(completed, "phase", "desktop", "pages", s.Pages, "blocks", s.Blocks, "collections", s.Collections)
 			fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d teams=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Teams, s.Collections, s.Comments, s.Source.Snapshot)
 		}
 		if cfg.Notion.API.Enabled && cfg.APIToken() != "" {
@@ -374,12 +394,46 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 			if err != nil {
 				return err
 			}
+			completed++
+			tracker.Set(completed, "phase", "api", "pages", s.Pages, "databases", s.Databases, "blocks", s.Blocks)
 			fmt.Fprintf(stdout, "api: users=%d pages=%d databases=%d database_rows=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Databases, s.DatabaseRows, s.Blocks, s.Comments)
 		}
 	default:
 		return fmt.Errorf("unknown source %q", *source)
 	}
 	return nil
+}
+
+func progressLogger(w io.Writer) *slog.Logger {
+	if w == nil {
+		w = io.Discard
+	}
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return attr
+		},
+	}))
+}
+
+func syncStageTotal(source string, cfg config.Config) int {
+	switch source {
+	case "desktop", "api":
+		return 1
+	case "all":
+		total := 0
+		if cfg.Notion.Desktop.Enabled {
+			total++
+		}
+		if cfg.Notion.API.Enabled && cfg.APIToken() != "" {
+			total++
+		}
+		return total
+	default:
+		return 0
+	}
 }
 
 func runExportMarkdown(ctx context.Context, stdout io.Writer, cfg config.Config) error {
