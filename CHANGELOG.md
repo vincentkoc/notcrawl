@@ -11,4 +11,5 @@
 - Normalize workspace-level Notion parents as `Workspace: <name>` so the TUI left pane does not split the same workspace into duplicate parent groups.
 - Inherit shared crawlkit TUI improvements for newest-first startup, count-header sorting, preview-first document detail panes, and gitcrawl-style metadata labels.
 - Feed longer, block-shaped Notion page previews into the TUI detail pane so pages read more like documents instead of flat metadata.
+- Include page comments in Notion TUI previews after block content.
 - Route the TUI through read-only SQLite access and cover the JSON fallback in tests.
