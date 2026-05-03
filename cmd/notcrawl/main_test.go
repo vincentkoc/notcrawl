@@ -109,6 +109,39 @@ func TestCollectionTUIRowsResolveParentCollectionNames(t *testing.T) {
 	}
 }
 
+func TestTUIRowsHideRawNotionParentIDs(t *testing.T) {
+	rows := pageTUIRows([]store.Page{{
+		ID:             "page1",
+		SpaceID:        "space1",
+		ParentID:       "space:00b8cbcf-c520-4790-999a-9c2940263721",
+		ParentTable:    "space",
+		CollectionID:   "",
+		Title:          "Launch Plan",
+		Alive:          true,
+		Source:         "test",
+		LastEditedTime: 1000,
+	}}, 10, nil, nil, map[string]string{"space1": "Comet.com", "00b8cbcf-c520-4790-999a-9c2940263721": "Comet.com"}, nil)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v", rows)
+	}
+	if rows[0].ParentID != "Comet.com" {
+		t.Fatalf("parent label = %q", rows[0].ParentID)
+	}
+
+	rows = pageTUIRows([]store.Page{{
+		ID:          "page2",
+		SpaceID:     "space1",
+		ParentID:    "330b54b1-d7cc-4cd7-96bc-4d705b5f37bf",
+		ParentTable: "block",
+		Title:       "Nested",
+		Alive:       true,
+		Source:      "test",
+	}}, 10, nil, nil, map[string]string{"space1": "Comet.com"}, nil)
+	if rows[0].ParentID != "Workspace: Comet.com" {
+		t.Fatalf("workspace fallback parent = %q", rows[0].ParentID)
+	}
+}
+
 func TestHelpMentionsTUI(t *testing.T) {
 	var stdout bytes.Buffer
 	if err := run(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {

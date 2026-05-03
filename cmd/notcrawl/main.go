@@ -737,7 +737,7 @@ func pageTUIRows(pages []store.Page, limit int, pageTitles map[string]string, co
 			title = page.ID
 		}
 		space := firstNonEmpty(spaceNames[page.SpaceID], page.SpaceID)
-		parent := firstNonEmpty(notionParentLabel(page.ParentTable, page.ParentID, pageTitles, collectionNames), notionWorkspaceParent(space))
+		parent := firstNonEmpty(notionParentLabel(page.ParentTable, page.ParentID, pageTitles, collectionNames, spaceNames), notionWorkspaceParent(space))
 		preview := previews[page.ID]
 		items = append(items, tui.Row{
 			Source:    "notion",
@@ -776,7 +776,7 @@ func collectionTUIRows(collections []store.Collection, limit int, pageTitles map
 			title = collection.ID
 		}
 		space := firstNonEmpty(spaceNames[collection.SpaceID], collection.SpaceID)
-		parent := firstNonEmpty(notionParentLabel(collection.ParentTable, collection.ParentID, pageTitles, collectionNames), notionWorkspaceParent(space))
+		parent := firstNonEmpty(notionParentLabel(collection.ParentTable, collection.ParentID, pageTitles, collectionNames, spaceNames), notionWorkspaceParent(space))
 		preview := collectionPreview(collection, space, parent)
 		items = append(items, tui.Row{
 			Source:    "notion",
@@ -879,20 +879,51 @@ func collectionNameMap(collections []store.Collection) map[string]string {
 	return out
 }
 
-func notionParentLabel(parentTable, parentID string, pageTitles map[string]string, collectionNames map[string]string) string {
+func notionParentLabel(parentTable, parentID string, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string) string {
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
 		return ""
 	}
-	switch strings.TrimSpace(parentTable) {
+	parentTable = strings.TrimSpace(parentTable)
+	if strings.HasPrefix(parentID, "space:") {
+		parentID = strings.TrimPrefix(parentID, "space:")
+		parentTable = "space"
+	}
+	switch parentTable {
 	case "page", "block":
-		return firstNonEmpty(pageTitles[parentID], parentID)
+		return firstNonEmpty(pageTitles[parentID], readableNotionParentFallback(parentID))
 	case "collection", "database", "data_source":
 		if collectionNames != nil {
-			return firstNonEmpty(collectionNames[parentID], parentID)
+			return firstNonEmpty(collectionNames[parentID], readableNotionParentFallback(parentID))
+		}
+	case "space", "team", "workspace":
+		if spaceNames != nil {
+			return firstNonEmpty(spaceNames[parentID], "")
 		}
 	}
-	return strings.Trim(parentTable+":"+parentID, ":")
+	return firstNonEmpty(readableNotionParentFallback(parentID), "")
+}
+
+func readableNotionParentFallback(parentID string) string {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" || looksLikeNotionID(parentID) {
+		return ""
+	}
+	return parentID
+}
+
+func looksLikeNotionID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 24 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func firstNonEmpty(values ...string) string {
