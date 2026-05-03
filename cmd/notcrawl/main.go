@@ -702,7 +702,7 @@ func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames)...)
+		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames, pagePreviews(ctx, st, pages, limit))...)
 		if len(rows) < limit {
 			rows = append(rows, collectionTUIRows(collections, limit-len(rows), pageTitles, spaceNames)...)
 		}
@@ -711,7 +711,7 @@ func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames)...)
+		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames, pagePreviews(ctx, st, pages, limit))...)
 	case "databases", "database", "collections", "collection":
 		rows = append(rows, collectionTUIRows(collections, limit, pageTitles, spaceNames)...)
 	default:
@@ -720,7 +720,7 @@ func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]
 	return rows, nil
 }
 
-func pageTUIRows(pages []store.Page, limit int, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string) []tui.Row {
+func pageTUIRows(pages []store.Page, limit int, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string, previews map[string]string) []tui.Row {
 	if limit > len(pages) {
 		limit = len(pages)
 	}
@@ -730,14 +730,17 @@ func pageTUIRows(pages []store.Page, limit int, pageTitles map[string]string, co
 		if title == "" {
 			title = page.ID
 		}
+		space := firstNonEmpty(spaceNames[page.SpaceID], page.SpaceID)
+		parent := firstNonEmpty(notionParentLabel(page.ParentTable, page.ParentID, pageTitles, collectionNames), notionWorkspaceParent(space))
 		items = append(items, tui.Row{
 			Source:    "notion",
 			Kind:      "page",
 			ID:        page.ID,
-			ParentID:  notionParentLabel(page.ParentTable, page.ParentID, pageTitles, collectionNames),
-			Scope:     firstNonEmpty(spaceNames[page.SpaceID], page.SpaceID),
+			ParentID:  parent,
+			Scope:     space,
 			Container: firstNonEmpty(collectionNames[page.CollectionID], page.CollectionID),
 			Title:     title,
+			Text:      previews[page.ID],
 			URL:       page.URL,
 			CreatedAt: formatMillis(page.CreatedTime),
 			UpdatedAt: formatMillis(page.LastEditedTime),
@@ -764,13 +767,16 @@ func collectionTUIRows(collections []store.Collection, limit int, pageTitles map
 		if title == "" {
 			title = collection.ID
 		}
+		space := firstNonEmpty(spaceNames[collection.SpaceID], collection.SpaceID)
+		parent := firstNonEmpty(notionParentLabel(collection.ParentTable, collection.ParentID, pageTitles, nil), notionWorkspaceParent(space))
 		items = append(items, tui.Row{
 			Source:    "notion",
 			Kind:      "database",
 			ID:        collection.ID,
-			ParentID:  notionParentLabel(collection.ParentTable, collection.ParentID, pageTitles, nil),
-			Scope:     firstNonEmpty(spaceNames[collection.SpaceID], collection.SpaceID),
+			ParentID:  parent,
+			Scope:     space,
 			Title:     title,
+			Text:      collectionPreview(collection, space, parent),
 			UpdatedAt: formatMillis(collection.SyncedAt),
 			Tags:      []string{collection.Source},
 			Fields: map[string]string{
@@ -782,6 +788,73 @@ func collectionTUIRows(collections []store.Collection, limit int, pageTitles map
 		})
 	}
 	return items
+}
+
+func pagePreviews(ctx context.Context, st *store.Store, pages []store.Page, limit int) map[string]string {
+	if limit > len(pages) {
+		limit = len(pages)
+	}
+	out := make(map[string]string, limit)
+	for _, page := range pages[:limit] {
+		blocks, err := st.PageBlocks(ctx, page.ID)
+		if err != nil {
+			continue
+		}
+		out[page.ID] = blockPreview(blocks, 10)
+	}
+	return out
+}
+
+func blockPreview(blocks []store.Block, maxLines int) string {
+	if maxLines <= 0 {
+		maxLines = 10
+	}
+	lines := make([]string, 0, maxLines)
+	for _, block := range blocks {
+		text := strings.TrimSpace(strings.Join(strings.Fields(block.Text), " "))
+		if text == "" {
+			continue
+		}
+		prefix := ""
+		switch block.Type {
+		case "bulleted_list", "to_do":
+			prefix = "- "
+		case "numbered_list":
+			prefix = "1. "
+		case "quote":
+			prefix = "> "
+		}
+		lines = append(lines, prefix+text)
+		if len(lines) >= maxLines {
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func collectionPreview(collection store.Collection, space, parent string) string {
+	var lines []string
+	if space != "" {
+		lines = append(lines, "Workspace: "+space)
+	}
+	if parent != "" {
+		lines = append(lines, "Parent: "+parent)
+	}
+	if strings.TrimSpace(collection.SchemaJSON) != "" {
+		lines = append(lines, "Schema captured")
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "Database metadata captured from Notion.")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func notionWorkspaceParent(space string) string {
+	space = strings.TrimSpace(space)
+	if space == "" {
+		return ""
+	}
+	return "Workspace: " + space
 }
 
 func collectionNameMap(collections []store.Collection) map[string]string {

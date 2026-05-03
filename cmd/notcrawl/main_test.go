@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,19 @@ func TestTUIJSONListsArchiveRowsWithoutMutation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.UpsertBlock(ctx, store.Block{
+		ID:           "block1",
+		PageID:       "page1",
+		ParentID:     "page1",
+		Type:         "bulleted_list",
+		Text:         "sync launch checklist",
+		DisplayOrder: 1,
+		Alive:        true,
+		Source:       "test",
+		SyncedAt:     now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +74,7 @@ func TestTUIJSONListsArchiveRowsWithoutMutation(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &rows); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
 	}
-	if len(rows) == 0 || rows[0]["title"] != "Launch Plan" || rows[0]["source"] != "notion" || rows[0]["kind"] != "page" || rows[0]["container"] != "Roadmap" {
+	if len(rows) == 0 || rows[0]["title"] != "Launch Plan" || rows[0]["source"] != "notion" || rows[0]["kind"] != "page" || rows[0]["container"] != "Roadmap" || !strings.Contains(fmt.Sprint(rows[0]["text"]), "sync launch checklist") {
 		t.Fatalf("unexpected rows: %#v", rows)
 	}
 	after, err := os.ReadFile(dbPath)
