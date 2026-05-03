@@ -816,12 +816,45 @@ func pagePreviews(ctx context.Context, st *store.Store, pages []store.Page, limi
 		if err != nil {
 			continue
 		}
-		out[page.ID] = blockPreview(blocks, tuiPagePreviewMax)
+		comments, err := st.PageComments(ctx, page.ID)
+		if err != nil {
+			comments = nil
+		}
+		out[page.ID] = pagePreview(blocks, comments, tuiPagePreviewMax)
 	}
 	return out
 }
 
+func pagePreview(blocks []store.Block, comments []store.Comment, maxLines int) string {
+	lines := blockPreviewLines(blocks, maxLines)
+	remaining := maxLines - len(lines)
+	if remaining > 1 && len(comments) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+			remaining--
+		}
+		lines = append(lines, "## Comments")
+		remaining--
+		for _, comment := range comments {
+			text := strings.TrimSpace(strings.Join(strings.Fields(comment.Text), " "))
+			if text == "" {
+				continue
+			}
+			lines = append(lines, "- "+text)
+			remaining--
+			if remaining <= 0 {
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func blockPreview(blocks []store.Block, maxLines int) string {
+	return strings.Join(blockPreviewLines(blocks, maxLines), "\n")
+}
+
+func blockPreviewLines(blocks []store.Block, maxLines int) []string {
 	if maxLines <= 0 {
 		maxLines = 10
 	}
@@ -855,7 +888,7 @@ func blockPreview(blocks []store.Block, maxLines int) string {
 			break
 		}
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 func collectionPreview(collection store.Collection, space, parent string) string {

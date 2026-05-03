@@ -179,6 +179,19 @@ func TestBlockPreviewKeepsNotionPageShape(t *testing.T) {
 	}
 }
 
+func TestPagePreviewIncludesComments(t *testing.T) {
+	got := pagePreview(
+		[]store.Block{{Type: "paragraph", Text: "status update"}},
+		[]store.Comment{{Text: "looks good"}, {Text: "ship it"}},
+		tuiPagePreviewMax,
+	)
+	for _, want := range []string{"status update", "## Comments", "- looks good", "- ship it"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("page preview missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestHelpMentionsTUI(t *testing.T) {
 	var stdout bytes.Buffer
 	if err := run(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {
