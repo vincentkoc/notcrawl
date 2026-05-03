@@ -107,6 +107,116 @@ func TestEnsureRepoUpdatesExistingOrigin(t *testing.T) {
 	}
 }
 
+func TestPublishCommitsOnlyGeneratedSnapshotFiles(t *testing.T) {
+	ctx := context.Background()
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repo, "init", "-b", "main")
+	notes := filepath.Join(repo, "notes.txt")
+	if err := os.WriteFile(notes, []byte("tracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repo, "add", "notes.txt")
+	runGitForTest(t, repo,
+		"-c", "commit.gpgsign=false",
+		"-c", "user.name=test",
+		"-c", "user.email=test@example.invalid",
+		"commit", "-m", "seed notes",
+	)
+	if err := os.WriteFile(notes, []byte("local edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	src, mdDir := snapshotStoreForTest(t, ctx, "Launch", "hello generated")
+	defer src.Close()
+	s, err := Publish(ctx, src, PublishOptions{RepoPath: repo, MarkdownDir: mdDir, Commit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Committed {
+		t.Fatal("expected generated snapshot commit")
+	}
+	status := gitOutputForTest(t, repo, "status", "--short", "--", "notes.txt")
+	if !strings.HasPrefix(status, " M notes.txt") {
+		t.Fatalf("expected unrelated tracked edit to remain unstaged, got %q", status)
+	}
+	committed := gitOutputForTest(t, repo, "show", "--name-only", "--format=", "HEAD")
+	if strings.Contains(committed, "notes.txt") {
+		t.Fatalf("unexpected unrelated file in snapshot commit:\n%s", committed)
+	}
+}
+
+func TestUpdatePullsExistingOriginWhenRemoteNotConfigured(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	remote := filepath.Join(dir, "remote.git")
+	runGitForTest(t, dir, "init", "--bare", remote)
+
+	seed := filepath.Join(dir, "seed")
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, seed, "init", "-b", "main")
+	src, mdDir := snapshotStoreForTest(t, ctx, "Old", "old snapshot")
+	if _, err := Publish(ctx, src, PublishOptions{RepoPath: seed, MarkdownDir: mdDir, Commit: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, seed, "remote", "add", "origin", remote)
+	runGitForTest(t, seed, "push", "-u", "origin", "main")
+
+	local := filepath.Join(dir, "local")
+	runGitForTest(t, dir, "clone", remote, local)
+
+	fresh, freshMD := snapshotStoreForTest(t, ctx, "Fresh", "fresh snapshot")
+	if _, err := Publish(ctx, fresh, PublishOptions{RepoPath: seed, Remote: remote, MarkdownDir: freshMD, Commit: true, Push: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dst, err := store.Open(filepath.Join(dir, "dst.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dst.Close()
+	if _, err := Update(ctx, dst, "", local, "main"); err != nil {
+		t.Fatal(err)
+	}
+	results, err := dst.Search(ctx, "fresh", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Title != "Fresh" {
+		t.Fatalf("expected fresh pulled snapshot, got %#v", results)
+	}
+}
+
+func snapshotStoreForTest(t *testing.T, ctx context.Context, title, text string) (*store.Store, string) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "snapshot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := store.NowMS()
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", Title: title, Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertBlock(ctx, store.Block{ID: "block1", PageID: "page1", ParentID: "page1", Type: "text", Text: text, Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	mdDir := t.TempDir()
+	if _, err := (markdown.Exporter{Store: st, Dir: mdDir}).Export(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return st, mdDir
+}
+
 func runGitForTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

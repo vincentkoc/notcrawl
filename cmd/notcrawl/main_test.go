@@ -82,6 +82,42 @@ func TestHelpMentionsTUI(t *testing.T) {
 	}
 }
 
+func TestVersionFlagWorksWithOtherGlobalFlags(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "missing.toml"), "--version"}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != version {
+		t.Fatalf("version = %q", got)
+	}
+}
+
+func TestMetadataDoesNotMarkPlainTextCommandsAsJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"metadata"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Commands map[string]struct {
+			JSON bool `json:"json"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &manifest); err != nil {
+		t.Fatalf("invalid metadata JSON: %v\n%s", err, stdout.String())
+	}
+	for _, name := range []string{"sync", "tap", "publish", "subscribe", "update"} {
+		if manifest.Commands[name].JSON {
+			t.Fatalf("%s should not be advertised as JSON", name)
+		}
+	}
+	for _, name := range []string{"status", "doctor", "tui-json"} {
+		if !manifest.Commands[name].JSON {
+			t.Fatalf("%s should be advertised as JSON", name)
+		}
+	}
+}
+
 func TestTUIHelpReturnsUsage(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

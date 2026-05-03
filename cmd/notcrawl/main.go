@@ -36,10 +36,6 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	if len(args) > 0 && args[0] == "--version" {
-		fmt.Fprintln(stdout, version)
-		return nil
-	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printHelp(stdout)
 		return nil
@@ -48,8 +44,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	global.SetOutput(stderr)
 	configPath := global.String("config", "", "config file path")
 	dbPath := global.String("db", "", "database path override")
+	versionFlag := global.Bool("version", false, "print version and exit")
 	if err := global.Parse(args); err != nil {
 		return err
+	}
+	if *versionFlag {
+		fmt.Fprintln(stdout, version)
+		return nil
 	}
 	rest := global.Args()
 	if len(rest) == 0 || rest[0] == "help" || rest[0] == "--help" || rest[0] == "-h" {
@@ -224,13 +225,13 @@ func runMetadata(stdout io.Writer) error {
 	manifest.Commands = map[string]control.Command{
 		"status":    {Title: "Status", Argv: []string{"notcrawl", "status", "--json"}, JSON: true},
 		"doctor":    {Title: "Doctor", Argv: []string{"notcrawl", "doctor", "--json"}, JSON: true},
-		"sync":      {Title: "Sync", Argv: []string{"notcrawl", "sync", "--source", "all"}, JSON: true, Mutates: true},
-		"tap":       {Title: "Import desktop cache", Argv: []string{"notcrawl", "sync", "--source", "desktop"}, JSON: true, Mutates: true},
+		"sync":      {Title: "Sync", Argv: []string{"notcrawl", "sync", "--source", "all"}, Mutates: true},
+		"tap":       {Title: "Import desktop cache", Argv: []string{"notcrawl", "sync", "--source", "desktop"}, Mutates: true},
 		"tui":       {Title: "Terminal browser", Argv: []string{"notcrawl", "tui"}},
 		"tui-json":  {Title: "Terminal browser rows", Argv: []string{"notcrawl", "tui", "--json"}, JSON: true},
-		"publish":   {Title: "Publish share", Argv: []string{"notcrawl", "publish"}, JSON: true, Mutates: true},
-		"subscribe": {Title: "Subscribe share", Argv: []string{"notcrawl", "subscribe"}, JSON: true, Mutates: true},
-		"update":    {Title: "Update share", Argv: []string{"notcrawl", "update"}, JSON: true, Mutates: true},
+		"publish":   {Title: "Publish share", Argv: []string{"notcrawl", "publish"}, Mutates: true},
+		"subscribe": {Title: "Subscribe share", Argv: []string{"notcrawl", "subscribe"}, Mutates: true},
+		"update":    {Title: "Update share", Argv: []string{"notcrawl", "update"}, Mutates: true},
 		"export-md": {Title: "Export Markdown", Argv: []string{"notcrawl", "export-md"}, Mutates: true},
 		"databases": {Title: "List databases", Argv: []string{"notcrawl", "databases"}},
 		"export-db": {Title: "Export database", Argv: []string{"notcrawl", "export-db"}, Mutates: true},
@@ -864,7 +865,7 @@ func runUpdate(ctx context.Context, stdout io.Writer, cfg config.Config, args []
 		return err
 	}
 	defer st.Close()
-	manifest, err := share.Update(ctx, st, *repo, *branch)
+	manifest, err := share.Update(ctx, st, cfg.Share.Remote, *repo, *branch)
 	if err != nil {
 		return err
 	}

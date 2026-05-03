@@ -118,7 +118,7 @@ func Publish(ctx context.Context, st *store.Store, opts PublishOptions) (Publish
 	}
 	s := PublishSummary{Manifest: manifest}
 	if opts.Commit {
-		committed, err := mirror.Commit(ctx, mirror.Options{RepoPath: opts.RepoPath, Remote: opts.Remote, Branch: opts.Branch}, opts.Message)
+		committed, err := commitGenerated(ctx, opts.RepoPath, opts.Message)
 		if err != nil {
 			return s, err
 		}
@@ -166,11 +166,11 @@ func Subscribe(ctx context.Context, st *store.Store, remote, repoPath, branch st
 	return Import(ctx, st, repoPath)
 }
 
-func Update(ctx context.Context, st *store.Store, repoPath, branch string) (Manifest, error) {
+func Update(ctx context.Context, st *store.Store, remote, repoPath, branch string) (Manifest, error) {
 	if branch == "" {
 		branch = "main"
 	}
-	if err := mirror.Pull(ctx, mirror.Options{RepoPath: repoPath, Branch: branch}); err != nil {
+	if err := pullForUpdate(ctx, repoPath, remote, branch); err != nil {
 		return Manifest{}, err
 	}
 	return Import(ctx, st, repoPath)
@@ -286,6 +286,54 @@ func ensureRepo(ctx context.Context, repoPath, remote, branch string) error {
 
 func hasChanges(ctx context.Context, repoPath string) (bool, error) {
 	return mirror.Dirty(ctx, mirror.Options{RepoPath: repoPath})
+}
+
+func pullForUpdate(ctx context.Context, repoPath, remote, branch string) error {
+	if strings.TrimSpace(remote) != "" {
+		return mirror.Pull(ctx, mirror.Options{RepoPath: repoPath, Remote: remote, Branch: branch})
+	}
+	if err := ensureRepo(ctx, repoPath, "", branch); err != nil {
+		return err
+	}
+	return runGit(ctx, repoPath, "pull", "--ff-only", "origin", branch)
+}
+
+func commitGenerated(ctx context.Context, repoPath, message string) (bool, error) {
+	if message == "" {
+		message = "archive: notcrawl snapshot"
+	}
+	if err := runGit(ctx, repoPath, "add", "--", "manifest.json", "data", "pages"); err != nil {
+		return false, err
+	}
+	staged, err := hasStagedGeneratedChanges(ctx, repoPath)
+	if err != nil {
+		return false, err
+	}
+	if !staged {
+		return false, nil
+	}
+	if err := runGit(ctx, repoPath,
+		"-c", "commit.gpgsign=false",
+		"-c", "user.name=crawlkit",
+		"-c", "user.email=crawlkit@example.invalid",
+		"commit", "-m", message, "--", "manifest.json", "data", "pages",
+	); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func hasStagedGeneratedChanges(ctx context.Context, repoPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "diff", "--cached", "--quiet", "--exit-code", "--", "manifest.json", "data", "pages")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return false, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, fmt.Errorf("git diff --cached: %w\n%s", err, strings.TrimSpace(string(out)))
 }
 
 func runGit(ctx context.Context, dir string, args ...string) error {
