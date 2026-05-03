@@ -162,6 +162,23 @@ func TestTUIRowsHideNoisyNotionBlockParentLabels(t *testing.T) {
 	}
 }
 
+func TestBlockPreviewKeepsNotionPageShape(t *testing.T) {
+	blocks := []store.Block{
+		{Type: "heading_1", Text: "Launch Plan"},
+		{Type: "bulleted_list", Text: "ship tui"},
+		{Type: "to_do", Text: "verify local binary"},
+		{Type: "numbered_list", Text: "open terminal"},
+		{Type: "quote", Text: "keep it readable"},
+		{Type: "code", Text: "notcrawl tui"},
+	}
+	got := blockPreview(blocks, tuiPagePreviewMax)
+	for _, want := range []string{"# Launch Plan", "- ship tui", "- [ ] verify local binary", "1. open terminal", "> keep it readable", "    notcrawl tui"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("preview missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestHelpMentionsTUI(t *testing.T) {
 	var stdout bytes.Buffer
 	if err := run(context.Background(), []string{"--help"}, &stdout, &bytes.Buffer{}); err != nil {

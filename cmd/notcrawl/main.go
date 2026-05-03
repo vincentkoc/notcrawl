@@ -30,6 +30,8 @@ import (
 
 var version = "dev"
 
+const tuiPagePreviewMax = 40
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "notcrawl:", err)
@@ -814,7 +816,7 @@ func pagePreviews(ctx context.Context, st *store.Store, pages []store.Page, limi
 		if err != nil {
 			continue
 		}
-		out[page.ID] = blockPreview(blocks, 10)
+		out[page.ID] = blockPreview(blocks, tuiPagePreviewMax)
 	}
 	return out
 }
@@ -831,12 +833,22 @@ func blockPreview(blocks []store.Block, maxLines int) string {
 		}
 		prefix := ""
 		switch block.Type {
-		case "bulleted_list", "to_do":
+		case "header", "heading_1":
+			prefix = "# "
+		case "sub_header", "heading_2":
+			prefix = "## "
+		case "sub_sub_header", "heading_3":
+			prefix = "### "
+		case "bulleted_list":
 			prefix = "- "
+		case "to_do":
+			prefix = "- [ ] "
 		case "numbered_list":
 			prefix = "1. "
 		case "quote":
 			prefix = "> "
+		case "code":
+			prefix = "    "
 		}
 		lines = append(lines, prefix+text)
 		if len(lines) >= maxLines {
