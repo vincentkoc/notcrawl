@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -286,6 +287,44 @@ func TestHelpMentionsTUI(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "tui") {
 		t.Fatalf("help missing tui command:\n%s", stdout.String())
+	}
+}
+
+func TestHelpAfterGlobalFlagsHasNoSideEffects(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"--config", configPath, "--db", filepath.Join(dir, "notcrawl.db"), "--help"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Usage of notcrawl:") || !strings.Contains(stdout.String(), "tui") {
+		t.Fatalf("help missing usage:\n%s", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(configPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("help should not write config, stat err=%v", err)
+	}
+}
+
+func TestInitHelpDoesNotWriteConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"--config", configPath, "init", "--help"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "Usage of init:") {
+		t.Fatalf("init help missing usage:\n%s", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(configPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("init --help should not write config, stat err=%v", err)
 	}
 }
 

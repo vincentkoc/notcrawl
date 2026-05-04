@@ -45,11 +45,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	global := flag.NewFlagSet("notcrawl", flag.ContinueOnError)
-	global.SetOutput(stderr)
+	global.SetOutput(io.Discard)
 	configPath := global.String("config", "", "config file path")
 	dbPath := global.String("db", "", "database path override")
 	versionFlag := global.Bool("version", false, "print version and exit")
 	if err := global.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printHelp(stdout)
+			return nil
+		}
 		return err
 	}
 	if *versionFlag {
@@ -71,6 +75,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runMetadata(stdout)
 	}
 	if cmd == "init" {
+		if hasHelpArg(cmdArgs) {
+			printInitUsage(stdout)
+			return nil
+		}
 		path, err := config.WriteStarter(*configPath)
 		if err != nil {
 			return err
@@ -1216,6 +1224,14 @@ func printTUIUsage(stdout io.Writer) error {
 	_, _ = fmt.Fprintln(fs.Output())
 	_, _ = fmt.Fprintln(fs.Output(), tui.ControlsHelp())
 	return nil
+}
+
+func printInitUsage(stdout io.Writer) {
+	fmt.Fprint(stdout, `Usage of init:
+  notcrawl [global flags] init
+
+Writes a starter TOML config to --config or the standard notcrawl config path.
+`)
 }
 
 func isReadOnlyQuery(query string) bool {
