@@ -13,6 +13,11 @@ var (
 	legacyInlineLinkArtifactRE = regexp.MustCompile(`\ba\s+((?:https?://|/)[^\s]+)`)
 	legacyInlineMarkArtifactRE = regexp.MustCompile(`\s+\b[bius]\b($|[\s,.;:])`)
 	legacyMentionArtifactRE    = regexp.MustCompile(`\bm\s+[0-9a-fA-F]{8}-[0-9a-fA-F-]{8,}(?:\s+[0-9a-fA-F-]{12,})?`)
+	legacyPageMentionRE        = regexp.MustCompile(`(?:‣\s*)?p\s+[0-9a-fA-F]{8}-[0-9a-fA-F-]{8,}(?:\s+[0-9a-fA-F-]{12,})?`)
+	legacyLinkedMentionRE      = regexp.MustCompile(`‣\s+lm\s+`)
+	legacyBareMentionRE        = regexp.MustCompile(`‣\s+[0-9a-fA-F]{8}-[0-9a-fA-F-]{8,}`)
+	spaceBeforePunctuationRE   = regexp.MustCompile(`\s+([,.;:])`)
+	repeatedCommaRE            = regexp.MustCompile(`(?:,\s*){2,}`)
 )
 
 func Normalize(s string) string {
@@ -23,6 +28,13 @@ func CleanLegacyArtifacts(s string) string {
 	s = legacyInlineLinkArtifactRE.ReplaceAllString(s, "<$1>")
 	s = legacyInlineMarkArtifactRE.ReplaceAllString(s, "$1")
 	s = legacyMentionArtifactRE.ReplaceAllString(s, "")
+	s = legacyPageMentionRE.ReplaceAllString(s, "")
+	s = legacyLinkedMentionRE.ReplaceAllString(s, "‣ ")
+	s = legacyBareMentionRE.ReplaceAllString(s, "")
+	s = Normalize(s)
+	s = repeatedCommaRE.ReplaceAllString(s, ", ")
+	s = spaceBeforePunctuationRE.ReplaceAllString(s, "$1")
+	s = strings.ReplaceAll(s, " and, ", ", ")
 	return Normalize(s)
 }
 

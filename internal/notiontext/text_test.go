@@ -65,6 +65,13 @@ func TestCleanLegacyArtifacts(t *testing.T) {
 	}
 }
 
+func TestCleanLegacyArtifactsRemovesMentionOpcodes(t *testing.T) {
+	got := CleanLegacyArtifacts("reach out to ‣ 1b1d872b-594c-811a-ad82-0002ea4fc797 and ‣ p 24d71240-10a3-80ae-8bde-d59bf00682c0 00b8cbcf-c520-4790-999a-9c2940263721,,, see ‣ lm Weekly Walk")
+	if got != "reach out to, see ‣ Weekly Walk" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestPlainWalksTitleOnlyOnce(t *testing.T) {
 	got := Plain(map[string]any{
 		"title": []any{map[string]any{
