@@ -120,7 +120,7 @@ func TestTUIRowsHideRawNotionParentIDs(t *testing.T) {
 		Alive:          true,
 		Source:         "test",
 		LastEditedTime: 1000,
-	}}, 10, nil, nil, map[string]string{"space1": "Comet.com", "00b8cbcf-c520-4790-999a-9c2940263721": "Comet.com"}, nil)
+	}}, 10, nil, nil, map[string]string{"space1": "Comet.com", "00b8cbcf-c520-4790-999a-9c2940263721": "Comet.com"}, nil, nil)
 	if len(rows) != 1 {
 		t.Fatalf("rows = %#v", rows)
 	}
@@ -136,7 +136,7 @@ func TestTUIRowsHideRawNotionParentIDs(t *testing.T) {
 		Title:       "Nested",
 		Alive:       true,
 		Source:      "test",
-	}}, 10, nil, nil, map[string]string{"space1": "Comet.com"}, nil)
+	}}, 10, nil, nil, map[string]string{"space1": "Comet.com"}, nil, nil)
 	if rows[0].ParentID != "Workspace: Comet.com" {
 		t.Fatalf("workspace fallback parent = %q", rows[0].ParentID)
 	}
@@ -153,12 +153,35 @@ func TestTUIRowsHideNoisyNotionBlockParentLabels(t *testing.T) {
 		Source:      "test",
 	}}, 10, map[string]string{
 		"block1": "ce 2fd71240-10a3-80a0-a65a-007aec07c0d9 00b8cbcf-c520-4790-999a-9c2940263721 Pods",
-	}, nil, map[string]string{"space1": "Comet.com"}, nil)
+	}, nil, map[string]string{"space1": "Comet.com"}, nil, nil)
 	if len(rows) != 1 {
 		t.Fatalf("rows = %#v", rows)
 	}
 	if rows[0].ParentID != "Workspace: Comet.com" {
 		t.Fatalf("noisy parent label = %q", rows[0].ParentID)
+	}
+}
+
+func TestTUIRowsResolveBlockParentToOwningPage(t *testing.T) {
+	rows := pageTUIRows([]store.Page{{
+		ID:          "page1",
+		SpaceID:     "space1",
+		ParentID:    "block-child",
+		ParentTable: "block",
+		Title:       "Nested",
+		Alive:       true,
+		Source:      "test",
+	}}, 10, map[string]string{
+		"parent-page": "Customer Folder",
+	}, nil, map[string]string{"space1": "Comet.com"}, map[string]store.ParentRef{
+		"block-child":  {ID: "block-parent", Table: "block"},
+		"block-parent": {ID: "parent-page", Table: "page"},
+	}, nil)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v", rows)
+	}
+	if rows[0].ParentID != "Customer Folder" {
+		t.Fatalf("resolved parent label = %q", rows[0].ParentID)
 	}
 }
 
