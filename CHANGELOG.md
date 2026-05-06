@@ -4,6 +4,8 @@
 
 - Add a repo-local `notcrawl` agent skill for local archive, freshness, query,
   and verification workflows.
+- Document `notcrawl sql` read-only query examples in the repo-local agent
+  skill so agents can do exact archive counts and inventory checks safely.
 - Replace the single validation workflow with CI jobs for dependencies,
   formatting/vet, tests, CLI control-surface smoke checks, and GoReleaser
   snapshot builds.

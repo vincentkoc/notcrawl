@@ -60,6 +60,22 @@ notcrawl report
 notcrawl sql "select count(*) from pages;"
 ```
 
+## SQL
+
+Use `notcrawl sql` for exact counts, joins, and database/page inventory queries
+when normal CLI reads are too coarse. The command only allows read-only
+`select`, `with`, and `pragma` queries.
+
+Useful examples:
+
+```bash
+notcrawl sql "select count(*) as pages from pages;"
+notcrawl sql "select parent_table, count(*) as pages from pages group by parent_table order by pages desc;"
+notcrawl sql "select title, last_edited_time from pages order by coalesce(last_edited_time, created_time, 0) desc limit 20;"
+```
+
+Do not use SQL to mutate the archive.
+
 When the installed CLI lacks a new feature, build or run from
 `~/GIT/_Perso/notcrawl` before concluding the feature is missing.
 
