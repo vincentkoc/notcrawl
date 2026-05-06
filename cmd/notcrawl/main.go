@@ -4,13 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/vincentkoc/crawlkit/control"
+	"github.com/vincentkoc/crawlkit/progress"
+	"github.com/vincentkoc/crawlkit/tui"
 	"github.com/vincentkoc/notcrawl/internal/config"
 	"github.com/vincentkoc/notcrawl/internal/markdown"
 	"github.com/vincentkoc/notcrawl/internal/notionapi"
@@ -21,6 +27,10 @@ import (
 	"github.com/vincentkoc/notcrawl/internal/store"
 	"github.com/vincentkoc/notcrawl/internal/tableexport"
 )
+
+var version = "dev"
+
+const tuiPagePreviewMax = 40
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -35,11 +45,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	global := flag.NewFlagSet("notcrawl", flag.ContinueOnError)
-	global.SetOutput(stderr)
+	global.SetOutput(io.Discard)
 	configPath := global.String("config", "", "config file path")
 	dbPath := global.String("db", "", "database path override")
+	versionFlag := global.Bool("version", false, "print version and exit")
 	if err := global.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printHelp(stdout)
+			return nil
+		}
 		return err
+	}
+	if *versionFlag {
+		fmt.Fprintln(stdout, version)
+		return nil
 	}
 	rest := global.Args()
 	if len(rest) == 0 || rest[0] == "help" || rest[0] == "--help" || rest[0] == "-h" {
@@ -48,13 +67,27 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	cmd := rest[0]
 	cmdArgs := rest[1:]
+	if cmd == "version" {
+		fmt.Fprintln(stdout, version)
+		return nil
+	}
+	if cmd == "metadata" {
+		return runMetadata(stdout)
+	}
 	if cmd == "init" {
+		if hasHelpArg(cmdArgs) {
+			printInitUsage(stdout)
+			return nil
+		}
 		path, err := config.WriteStarter(*configPath)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "wrote %s\n", path)
 		return nil
+	}
+	if cmd == "tui" && hasHelpArg(cmdArgs) {
+		return printTUIUsage(stdout)
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -68,15 +101,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	switch cmd {
 	case "doctor":
-		return runDoctor(ctx, stdout, cfg)
+		return runDoctor(ctx, stdout, cfg, cmdArgs)
 	case "status":
-		return runStatus(ctx, stdout, cfg)
+		return runStatus(ctx, stdout, cfg, cmdArgs)
 	case "report":
 		return runReport(ctx, stdout, cfg)
 	case "maintain":
 		return runMaintain(ctx, stdout, cfg, cmdArgs)
 	case "sync":
-		return runSync(ctx, stdout, cfg, cmdArgs)
+		return runSync(ctx, stdout, stderr, cfg, cmdArgs)
+	case "tap":
+		return runSync(ctx, stdout, stderr, cfg, []string{"--source", "desktop"})
 	case "export-md":
 		return runExportMarkdown(ctx, stdout, cfg)
 	case "databases":
@@ -85,6 +120,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runExportDatabase(ctx, stdout, cfg, cmdArgs)
 	case "search":
 		return runSearch(ctx, stdout, cfg, cmdArgs)
+	case "tui":
+		return runTUI(ctx, stdout, cfg, cmdArgs)
 	case "sql":
 		return runSQL(ctx, stdout, cfg, cmdArgs)
 	case "publish":
@@ -98,12 +135,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
-	st, err := store.Open(cfg.DBPath)
-	if err != nil {
+func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print doctor JSON")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	defer st.Close()
+	if fs.NArg() != 0 {
+		return fmt.Errorf("doctor takes flags only")
+	}
+	_ = jsonOut
 	desktop, err := notiondesktop.Inspect(cfg.Notion.Desktop.Path)
 	if err != nil {
 		return err
@@ -118,9 +159,18 @@ func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 		"api_token_env":     cfg.Notion.API.TokenEnv,
 		"api_token_present": cfg.APIToken() != "",
 	}
-	status, err := st.Status(ctx)
+	status := store.Status{DBPath: cfg.DBPath}
+	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
-		return err
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		defer st.Close()
+		status, err = st.Status(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	report["status"] = status
 	report["api_version"] = cfg.Notion.API.Version
@@ -132,15 +182,30 @@ func runDoctor(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 	return nil
 }
 
-func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config) error {
-	st, err := store.Open(cfg.DBPath)
-	if err != nil {
+func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "print normalized crawlkit status JSON")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	defer st.Close()
-	status, err := st.Status(ctx)
+	if fs.NArg() != 0 {
+		return fmt.Errorf("status takes flags only")
+	}
+	status := store.Status{DBPath: cfg.DBPath}
+	st, err := store.OpenReadOnly(cfg.DBPath)
 	if err != nil {
-		return err
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		defer st.Close()
+		status, err = st.Status(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	if *jsonOut {
+		return writeJSON(stdout, controlStatus(cfg, status))
 	}
 	b, err := json.MarshalIndent(status, "", "  ")
 	if err != nil {
@@ -148,6 +213,91 @@ func runStatus(ctx context.Context, stdout io.Writer, cfg config.Config) error {
 	}
 	fmt.Fprintln(stdout, string(b))
 	return nil
+}
+
+func runMetadata(stdout io.Writer) error {
+	defaults := config.Default()
+	configPath, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	manifest := control.NewManifest("notcrawl", "Notion Crawl", "notcrawl")
+	manifest.Description = "Local-first Notion archive crawler."
+	manifest.Branding = control.Branding{SymbolName: "doc.text.magnifyingglass", AccentColor: "#111111", BundleIdentifier: "notion.id"}
+	manifest.Paths = control.Paths{
+		DefaultConfig:   configPath,
+		ConfigEnv:       "NOTCRAWL_CONFIG",
+		DefaultDatabase: defaults.DBPath,
+		DefaultCache:    defaults.CacheDir,
+		DefaultLogs:     filepath.Join(filepath.Dir(defaults.DBPath), "logs"),
+		DefaultShare:    defaults.Share.RepoPath,
+	}
+	manifest.Capabilities = []string{"metadata", "status", "doctor", "sync", "tap", "tui", "git-share", "sql", "markdown", "table-export"}
+	manifest.Privacy = control.Privacy{ContainsPrivateMessages: false, ExportsSecrets: false, LocalOnlyScopes: []string{"notion", "desktop-cache", "sqlite", "git-share"}}
+	manifest.Commands = map[string]control.Command{
+		"status":    {Title: "Status", Argv: []string{"notcrawl", "status", "--json"}, JSON: true},
+		"doctor":    {Title: "Doctor", Argv: []string{"notcrawl", "doctor", "--json"}, JSON: true},
+		"sync":      {Title: "Sync", Argv: []string{"notcrawl", "sync", "--source", "all"}, Mutates: true},
+		"tap":       {Title: "Import desktop cache", Argv: []string{"notcrawl", "sync", "--source", "desktop"}, Mutates: true},
+		"tui":       {Title: "Terminal browser", Argv: []string{"notcrawl", "tui"}},
+		"tui-json":  {Title: "Terminal browser rows", Argv: []string{"notcrawl", "tui", "--json"}, JSON: true},
+		"publish":   {Title: "Publish share", Argv: []string{"notcrawl", "publish"}, Mutates: true},
+		"subscribe": {Title: "Subscribe share", Argv: []string{"notcrawl", "subscribe"}, Mutates: true},
+		"update":    {Title: "Update share", Argv: []string{"notcrawl", "update"}, Mutates: true},
+		"export-md": {Title: "Export Markdown", Argv: []string{"notcrawl", "export-md"}, Mutates: true},
+		"databases": {Title: "List databases", Argv: []string{"notcrawl", "databases"}},
+		"export-db": {Title: "Export database", Argv: []string{"notcrawl", "export-db"}, Mutates: true},
+		"legacy-db": {Title: "Legacy database override", Argv: []string{"notcrawl", "--db"}, Legacy: true},
+	}
+	return writeJSON(stdout, manifest)
+}
+
+func writeJSON(stdout io.Writer, value any) error {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(value)
+}
+
+func controlStatus(cfg config.Config, status store.Status) control.Status {
+	counts := []control.Count{
+		control.NewCount("spaces", "Spaces", int64(status.Spaces)),
+		control.NewCount("users", "Users", int64(status.Users)),
+		control.NewCount("teams", "Teams", int64(status.Teams)),
+		control.NewCount("pages", "Pages", int64(status.Pages)),
+		control.NewCount("blocks", "Blocks", int64(status.Blocks)),
+		control.NewCount("collections", "Databases", int64(status.Collections)),
+		control.NewCount("comments", "Comments", int64(status.Comments)),
+		control.NewCount("raw_records", "Raw records", int64(status.RawRecords)),
+	}
+	out := control.NewStatus("notcrawl", fmt.Sprintf("%d pages and %d databases", status.Pages, status.Collections))
+	out.State = "current"
+	out.DatabasePath = status.DBPath
+	out.DatabaseBytes = status.DBBytes
+	out.WALBytes = status.WALBytes
+	out.Counts = counts
+	if status.LastSyncAt > 0 {
+		out.LastSyncAt = time.UnixMilli(status.LastSyncAt).UTC().Format(time.RFC3339)
+	}
+	out.Share = &control.Share{Enabled: cfg.Share.Remote != "" || cfg.Share.RepoPath != "", RepoPath: cfg.Share.RepoPath, Remote: cfg.Share.Remote, Branch: cfg.Share.Branch}
+	out.Databases = append(out.Databases, control.SQLiteDatabase("primary", "Notion archive", "archive", status.DBPath, true, counts))
+	out.Databases = append(out.Databases, desktopCacheDatabases(cfg.CacheDir)...)
+	return out
+}
+
+func desktopCacheDatabases(cacheDir string) []control.Database {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return nil
+	}
+	var out []control.Database
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			continue
+		}
+		path := filepath.Join(cacheDir, entry.Name())
+		out = append(out, control.SQLiteDatabase("cache-"+strings.TrimSuffix(entry.Name(), ".db"), entry.Name(), "desktop-cache", path, false, nil))
+	}
+	return out
 }
 
 func runReport(ctx context.Context, stdout io.Writer, cfg config.Config) error {
@@ -191,7 +341,7 @@ func runMaintain(ctx context.Context, stdout io.Writer, cfg config.Config, args 
 	return nil
 }
 
-func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+func runSync(ctx context.Context, stdout, stderr io.Writer, cfg config.Config, args []string) (err error) {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	source := fs.String("source", "all", "source: desktop, api, all")
 	if err := fs.Parse(args); err != nil {
@@ -202,12 +352,26 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 		return err
 	}
 	defer st.Close()
+	tracker := progress.New(progressLogger(stderr), progress.Options{
+		Name:  "sync",
+		Unit:  "stages",
+		Total: int64(syncStageTotal(*source, cfg)),
+		Attrs: []any{"source", *source},
+	})
+	completed := int64(0)
+	defer func() {
+		if tracker != nil {
+			tracker.Finish(err)
+		}
+	}()
 	switch *source {
 	case "desktop":
 		s, err := notiondesktop.Ingest(ctx, st, cfg.Notion.Desktop.Path, cfg.CacheDir)
 		if err != nil {
 			return err
 		}
+		completed++
+		tracker.Set(completed, "phase", "desktop", "pages", s.Pages, "blocks", s.Blocks, "collections", s.Collections)
 		fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d teams=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Teams, s.Collections, s.Comments, s.Source.Snapshot)
 	case "api":
 		s, err := notionapi.Client{
@@ -218,6 +382,8 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 		if err != nil {
 			return err
 		}
+		completed++
+		tracker.Set(completed, "phase", "api", "pages", s.Pages, "databases", s.Databases, "blocks", s.Blocks)
 		fmt.Fprintf(stdout, "api: users=%d pages=%d databases=%d database_rows=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Databases, s.DatabaseRows, s.Blocks, s.Comments)
 	case "all":
 		if cfg.Notion.Desktop.Enabled {
@@ -225,6 +391,8 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 			if err != nil {
 				return err
 			}
+			completed++
+			tracker.Set(completed, "phase", "desktop", "pages", s.Pages, "blocks", s.Blocks, "collections", s.Collections)
 			fmt.Fprintf(stdout, "desktop: pages=%d blocks=%d teams=%d collections=%d comments=%d snapshot=%s\n", s.Pages, s.Blocks, s.Teams, s.Collections, s.Comments, s.Source.Snapshot)
 		}
 		if cfg.Notion.API.Enabled && cfg.APIToken() != "" {
@@ -236,12 +404,46 @@ func runSync(ctx context.Context, stdout io.Writer, cfg config.Config, args []st
 			if err != nil {
 				return err
 			}
+			completed++
+			tracker.Set(completed, "phase", "api", "pages", s.Pages, "databases", s.Databases, "blocks", s.Blocks)
 			fmt.Fprintf(stdout, "api: users=%d pages=%d databases=%d database_rows=%d blocks=%d comments=%d\n", s.Users, s.Pages, s.Databases, s.DatabaseRows, s.Blocks, s.Comments)
 		}
 	default:
 		return fmt.Errorf("unknown source %q", *source)
 	}
 	return nil
+}
+
+func progressLogger(w io.Writer) *slog.Logger {
+	if w == nil {
+		w = io.Discard
+	}
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
+		ReplaceAttr: func(_ []string, attr slog.Attr) slog.Attr {
+			if attr.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return attr
+		},
+	}))
+}
+
+func syncStageTotal(source string, cfg config.Config) int {
+	switch source {
+	case "desktop", "api":
+		return 1
+	case "all":
+		total := 0
+		if cfg.Notion.Desktop.Enabled {
+			total++
+		}
+		if cfg.Notion.API.Enabled && cfg.APIToken() != "" {
+			total++
+		}
+		return total
+	default:
+		return 0
+	}
 }
 
 func runExportMarkdown(ctx context.Context, stdout io.Writer, cfg config.Config) error {
@@ -431,6 +633,445 @@ func runSearch(ctx context.Context, stdout io.Writer, cfg config.Config, args []
 	return nil
 }
 
+func runTUI(ctx context.Context, stdout io.Writer, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), "Usage of tui:")
+		fs.PrintDefaults()
+		_, _ = fmt.Fprintln(fs.Output())
+		_, _ = fmt.Fprintln(fs.Output(), tui.ControlsHelp())
+	}
+	if hasHelpArg(args) {
+		fs.SetOutput(stdout)
+	}
+	limit := fs.Int("limit", 200, "maximum rows to load")
+	kind := fs.String("kind", "all", "rows to browse: all, pages, databases")
+	jsonOut := fs.Bool("json", false, "print browser rows as JSON instead of opening the terminal UI")
+	if len(args) == 1 && args[0] == "help" {
+		fs.Usage()
+		return nil
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("tui takes flags only")
+	}
+	if *limit <= 0 {
+		return fmt.Errorf("tui --limit must be positive")
+	}
+	rows, err := tuiRows(ctx, cfg, *kind, *limit)
+	if err != nil {
+		return err
+	}
+	refreshRows := func(ctx context.Context) ([]tui.Row, error) {
+		return tuiRows(ctx, cfg, *kind, *limit)
+	}
+	return tui.Browse(ctx, tui.BrowseOptions{
+		AppName:        "notcrawl",
+		Title:          "notcrawl archive",
+		EmptyMessage:   "notcrawl has no local pages or databases yet",
+		Rows:           rows,
+		Refresh:        refreshRows,
+		JSON:           *jsonOut,
+		Layout:         tui.LayoutDocument,
+		SourceKind:     archiveSourceKind(cfg),
+		SourceLocation: archiveSourceLocation(cfg),
+		Stdout:         stdout,
+	})
+}
+
+func archiveSourceKind(cfg config.Config) string {
+	if strings.TrimSpace(cfg.Share.Remote) != "" {
+		return tui.SourceRemote
+	}
+	return tui.SourceLocal
+}
+
+func archiveSourceLocation(cfg config.Config) string {
+	if strings.TrimSpace(cfg.Share.Remote) != "" {
+		return cfg.Share.Remote
+	}
+	return cfg.DBPath
+}
+
+func tuiRows(ctx context.Context, cfg config.Config, kind string, limit int) ([]tui.Row, error) {
+	st, err := store.OpenReadOnly(cfg.DBPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []tui.Row{}, nil
+		}
+		return nil, err
+	}
+	defer st.Close()
+	pageTitles, _ := st.PageTitles(ctx)
+	spaceNames, _ := st.SpaceNames(ctx)
+	blockParents, _ := st.BlockParents(ctx)
+	collections, err := st.Collections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	collectionNames := collectionNameMap(collections)
+	var rows []tui.Row
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "", "all":
+		pages, err := st.Pages(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames, blockParents, pagePreviews(ctx, st, pages, limit))...)
+		rows = append(rows, collectionTUIRows(collections, collectionBrowserLimit(limit), pageTitles, collectionNames, spaceNames)...)
+	case "pages", "page":
+		pages, err := st.Pages(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, pageTUIRows(pages, limit, pageTitles, collectionNames, spaceNames, blockParents, pagePreviews(ctx, st, pages, limit))...)
+	case "databases", "database", "collections", "collection":
+		rows = append(rows, collectionTUIRows(collections, limit, pageTitles, collectionNames, spaceNames)...)
+	default:
+		return nil, fmt.Errorf("unknown tui kind %q", kind)
+	}
+	return rows, nil
+}
+
+func collectionBrowserLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit < 50 {
+		return limit
+	}
+	return 50
+}
+
+func pageTUIRows(pages []store.Page, limit int, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string, blockParents map[string]store.ParentRef, previews map[string]string) []tui.Row {
+	if limit > len(pages) {
+		limit = len(pages)
+	}
+	items := make([]tui.Row, 0, limit)
+	for _, page := range pages[:limit] {
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			title = page.ID
+		}
+		space := firstNonEmpty(spaceNames[page.SpaceID], page.SpaceID)
+		parent := cleanNotionParentLabel(firstNonEmpty(notionParentLabel(page.ParentTable, page.ParentID, pageTitles, collectionNames, spaceNames, blockParents), notionWorkspaceParent(space)), space)
+		preview := previews[page.ID]
+		items = append(items, tui.Row{
+			Source:    "notion",
+			Kind:      "page",
+			ID:        page.ID,
+			ParentID:  parent,
+			Scope:     space,
+			Container: firstNonEmpty(collectionNames[page.CollectionID], page.CollectionID),
+			Title:     title,
+			Text:      preview,
+			Detail:    preview,
+			URL:       page.URL,
+			CreatedAt: formatMillis(page.CreatedTime),
+			UpdatedAt: formatMillis(page.LastEditedTime),
+			Tags:      []string{page.Source},
+			Fields: map[string]string{
+				"collection_id": page.CollectionID,
+				"parent_id":     page.ParentID,
+				"parent_table":  page.ParentTable,
+				"source":        page.Source,
+				"space_id":      page.SpaceID,
+			},
+		})
+	}
+	return items
+}
+
+func collectionTUIRows(collections []store.Collection, limit int, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string) []tui.Row {
+	if limit > len(collections) {
+		limit = len(collections)
+	}
+	items := make([]tui.Row, 0, limit)
+	for _, collection := range collections[:limit] {
+		title := strings.TrimSpace(collection.Name)
+		if title == "" {
+			title = collection.ID
+		}
+		space := firstNonEmpty(spaceNames[collection.SpaceID], collection.SpaceID)
+		parent := cleanNotionParentLabel(firstNonEmpty(notionParentLabel(collection.ParentTable, collection.ParentID, pageTitles, collectionNames, spaceNames, nil), notionWorkspaceParent(space)), space)
+		preview := collectionPreview(collection, space, parent)
+		items = append(items, tui.Row{
+			Source:    "notion",
+			Kind:      "database",
+			ID:        collection.ID,
+			ParentID:  parent,
+			Scope:     space,
+			Title:     title,
+			Text:      preview,
+			Detail:    preview,
+			UpdatedAt: formatMillis(collection.SyncedAt),
+			Tags:      []string{collection.Source},
+			Fields: map[string]string{
+				"parent_id":    collection.ParentID,
+				"parent_table": collection.ParentTable,
+				"source":       collection.Source,
+				"space_id":     collection.SpaceID,
+			},
+		})
+	}
+	return items
+}
+
+func pagePreviews(ctx context.Context, st *store.Store, pages []store.Page, limit int) map[string]string {
+	if limit > len(pages) {
+		limit = len(pages)
+	}
+	out := make(map[string]string, limit)
+	for _, page := range pages[:limit] {
+		blocks, err := st.PageBlocks(ctx, page.ID)
+		if err != nil {
+			continue
+		}
+		comments, err := st.PageComments(ctx, page.ID)
+		if err != nil {
+			comments = nil
+		}
+		out[page.ID] = pagePreview(blocks, comments, tuiPagePreviewMax)
+	}
+	return out
+}
+
+func pagePreview(blocks []store.Block, comments []store.Comment, maxLines int) string {
+	lines := blockPreviewLines(blocks, maxLines)
+	remaining := maxLines - len(lines)
+	if remaining > 1 && len(comments) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+			remaining--
+		}
+		lines = append(lines, "## Comments")
+		remaining--
+		for _, comment := range comments {
+			text := notiontext.CleanLegacyArtifacts(comment.Text)
+			if text == "" {
+				continue
+			}
+			lines = append(lines, "- "+text)
+			remaining--
+			if remaining <= 0 {
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func blockPreview(blocks []store.Block, maxLines int) string {
+	return strings.Join(blockPreviewLines(blocks, maxLines), "\n")
+}
+
+func blockPreviewLines(blocks []store.Block, maxLines int) []string {
+	if maxLines <= 0 {
+		maxLines = 10
+	}
+	lines := make([]string, 0, maxLines)
+	for _, block := range blocks {
+		text := compactPreviewNoise(notiontext.CleanLegacyArtifacts(block.Text))
+		if text == "" {
+			continue
+		}
+		prefix := ""
+		switch block.Type {
+		case "header", "heading_1":
+			prefix = "# "
+		case "sub_header", "heading_2":
+			prefix = "## "
+		case "sub_sub_header", "heading_3":
+			prefix = "### "
+		case "bulleted_list":
+			prefix = "- "
+		case "to_do":
+			prefix = "- [ ] "
+		case "numbered_list":
+			prefix = "1. "
+		case "quote":
+			prefix = "> "
+		case "code":
+			prefix = "    "
+		}
+		lines = append(lines, prefix+text)
+		if len(lines) >= maxLines {
+			break
+		}
+	}
+	return lines
+}
+
+func compactPreviewNoise(s string) string {
+	s = strings.ReplaceAll(s, "linked pagess", "linked pages")
+	for strings.Contains(s, "linked page, linked page") ||
+		strings.Contains(s, "linked pages, linked page") ||
+		strings.Contains(s, "linked page, linked pages") ||
+		strings.Contains(s, "linked pages, linked pages") {
+		s = strings.ReplaceAll(s, "linked pages, linked page", "linked pages")
+		s = strings.ReplaceAll(s, "linked page, linked pages", "linked pages")
+		s = strings.ReplaceAll(s, "linked pages, linked pages", "linked pages")
+		s = strings.ReplaceAll(s, "linked page, linked page", "linked pages")
+		s = strings.ReplaceAll(s, "linked pagess", "linked pages")
+	}
+	return s
+}
+
+func collectionPreview(collection store.Collection, space, parent string) string {
+	var lines []string
+	if space != "" {
+		lines = append(lines, "Workspace: "+space)
+	}
+	if parent != "" {
+		lines = append(lines, "Parent: "+parent)
+	}
+	if strings.TrimSpace(collection.SchemaJSON) != "" {
+		lines = append(lines, "Schema captured")
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "Database metadata captured from Notion.")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func notionWorkspaceParent(space string) string {
+	space = strings.TrimSpace(space)
+	if space == "" {
+		return ""
+	}
+	return "Workspace: " + space
+}
+
+func collectionNameMap(collections []store.Collection) map[string]string {
+	out := make(map[string]string, len(collections))
+	for _, collection := range collections {
+		name := strings.TrimSpace(collection.Name)
+		if name == "" {
+			name = collection.ID
+		}
+		out[collection.ID] = name
+	}
+	return out
+}
+
+func notionParentLabel(parentTable, parentID string, pageTitles map[string]string, collectionNames map[string]string, spaceNames map[string]string, blockParents map[string]store.ParentRef) string {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return ""
+	}
+	parentTable = strings.TrimSpace(parentTable)
+	if strings.HasPrefix(parentID, "space:") {
+		parentID = strings.TrimPrefix(parentID, "space:")
+		parentTable = "space"
+	}
+	seen := map[string]bool{}
+	for depth := 0; depth < 16 && parentID != ""; depth++ {
+		key := parentTable + ":" + parentID
+		if seen[key] {
+			return ""
+		}
+		seen[key] = true
+		switch parentTable {
+		case "page":
+			return firstNonEmpty(pageTitles[parentID], readableNotionParentFallback(parentID))
+		case "block":
+			if title := firstNonEmpty(pageTitles[parentID], ""); title != "" {
+				return title
+			}
+			if blockParents != nil {
+				if parent, ok := blockParents[parentID]; ok {
+					parentTable = strings.TrimSpace(parent.Table)
+					parentID = strings.TrimSpace(parent.ID)
+					continue
+				}
+			}
+			return readableNotionParentFallback(parentID)
+		case "collection", "database", "data_source":
+			if collectionNames != nil {
+				return firstNonEmpty(collectionNames[parentID], readableNotionParentFallback(parentID))
+			}
+		case "space", "team", "workspace":
+			if spaceNames != nil {
+				if name := firstNonEmpty(spaceNames[parentID], ""); name != "" {
+					return notionWorkspaceParent(name)
+				}
+			}
+		}
+		return firstNonEmpty(readableNotionParentFallback(parentID), "")
+	}
+	return ""
+}
+
+func readableNotionParentFallback(parentID string) string {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" || looksLikeNotionID(parentID) {
+		return ""
+	}
+	return parentID
+}
+
+func cleanNotionParentLabel(label, workspace string) string {
+	label = strings.TrimSpace(label)
+	if label == "" || noisyNotionLabel(label) {
+		return notionWorkspaceParent(workspace)
+	}
+	return label
+}
+
+func noisyNotionLabel(label string) bool {
+	label = strings.TrimSpace(label)
+	if label == "" || looksLikeNotionID(label) {
+		return true
+	}
+	seenID := false
+	for _, field := range strings.Fields(label) {
+		token := strings.Trim(field, ".,;:()[]{}<>\"'")
+		if looksLikeNotionID(token) {
+			if seenID {
+				return true
+			}
+			seenID = true
+		}
+	}
+	return seenID && len([]rune(label)) > 80
+}
+
+func looksLikeNotionID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 24 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func formatMillis(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
+}
+
 func searchField(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
@@ -522,7 +1163,7 @@ func runUpdate(ctx context.Context, stdout io.Writer, cfg config.Config, args []
 		return err
 	}
 	defer st.Close()
-	manifest, err := share.Update(ctx, st, *repo, *branch)
+	manifest, err := share.Update(ctx, st, cfg.Share.Remote, *repo, *branch)
 	if err != nil {
 		return err
 	}
@@ -563,6 +1204,36 @@ func printRows(w io.Writer, rows *sql.Rows) error {
 	return rows.Err()
 }
 
+func hasHelpArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "help" || arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+func printTUIUsage(stdout io.Writer) error {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	fs.Int("limit", 200, "maximum rows to load")
+	fs.String("kind", "all", "rows to browse: all, pages, databases")
+	fs.Bool("json", false, "print browser rows as JSON instead of opening the terminal UI")
+	_, _ = fmt.Fprintln(fs.Output(), "Usage of tui:")
+	fs.PrintDefaults()
+	_, _ = fmt.Fprintln(fs.Output())
+	_, _ = fmt.Fprintln(fs.Output(), tui.ControlsHelp())
+	return nil
+}
+
+func printInitUsage(stdout io.Writer) {
+	fmt.Fprint(stdout, `Usage of init:
+  notcrawl [global flags] init
+
+Writes a starter TOML config to --config or the standard notcrawl config path.
+`)
+}
+
 func isReadOnlyQuery(query string) bool {
 	lower := strings.ToLower(strings.TrimSpace(query))
 	return strings.HasPrefix(lower, "select ") || strings.HasPrefix(lower, "with ") || strings.HasPrefix(lower, "pragma ")
@@ -575,8 +1246,11 @@ func printHelp(w io.Writer) {
 Global flags:
   --config PATH   config file path
   --db PATH       database path override
+  --version       print version and exit
 
 Commands:
+  metadata                  Print crawlkit control metadata
+  version                   Print version
   init                      Write a starter config
   doctor                    Check config, database, desktop cache, and token
   status                    Show archive counts and database size
@@ -585,11 +1259,13 @@ Commands:
   sync --source desktop     Ingest Notion Desktop cache
   sync --source api         Ingest through the official Notion API
   sync --source all         Run enabled sources
+  tap                       Legacy-friendly alias for sync --source desktop
   export-md                 Render normalized Markdown from SQLite
   databases                 List crawled Notion databases
   export-db --database ID   Export a database as CSV or TSV
   export-db --all --dir DIR Export every database as CSV or TSV
   search QUERY              Search page text
+  tui                       Browse pages and databases in the terminal UI
   sql QUERY                 Run read-only SQL
   publish [--push]          Export data and Markdown into a git share repo
   subscribe REMOTE          Clone/import a git share repo

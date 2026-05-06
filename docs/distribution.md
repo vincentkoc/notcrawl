@@ -10,6 +10,19 @@ go test ./...
 go build ./cmd/notcrawl
 ```
 
+Also smoke the crawlkit control and non-interactive TUI surfaces before a tag:
+
+```bash
+notcrawl metadata --json
+notcrawl status --json
+notcrawl doctor --json
+notcrawl tui --json --limit 10
+```
+
+The CI workflow runs the same control-surface smoke checks, plus dependency
+verification, `gofmt`, `go vet`, tests, a GoReleaser snapshot build, and
+CodeQL.
+
 If GoReleaser is installed:
 
 ```bash

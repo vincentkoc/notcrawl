@@ -1,0 +1,29 @@
+# Changelog
+
+## Unreleased
+
+- Replace the single validation workflow with CI jobs for dependencies,
+  formatting/vet, tests, CLI control-surface smoke checks, and GoReleaser
+  snapshot builds.
+- Add CodeQL analysis on pull requests, `main`, the crawlkit integration branch,
+  weekly schedule, and manual dispatch.
+- Depend on `github.com/vincentkoc/crawlkit v0.4.0` for shared config,
+  status/control, snapshot, mirror, output, and terminal explorer mechanics.
+- Keep Notion API/Desktop parsing, Markdown rendering, page/comment/database
+  schemas, Notion FTS body construction, and data-source compatibility
+  app-owned while the shared mechanics move to crawlkit.
+- Document the gitcrawl-style document TUI shape: workspace/teamspace/page or
+  database groups, page/database rows, preview/comment detail, sorting, mouse
+  selection, right-click actions, and local/remote status chrome.
+- Add crawlkit control metadata/status surfaces with `metadata --json`, `status --json`, and `doctor --json`.
+- Report primary archive and desktop-cache SQLite inventories in status JSON for shared local control surfaces.
+- Add `notcrawl tui`, a local terminal browser for archived pages and databases backed by `crawlkit/tui`.
+- Render TUI rows with compact panes so page and database metadata stays in context/detail instead of crowding the row list.
+- Resolve database parent names for the TUI parent pane so collection nesting is readable instead of raw IDs.
+- Hide noisy block-derived Notion parent labels in the TUI by falling back to the workspace label when parent text contains raw Notion identifiers.
+- Resolve block-parent pages to their owning page when possible so the TUI parent pane shows real Notion hierarchy instead of broad workspace buckets.
+- Normalize workspace-level Notion parents as `Workspace: <name>` so the TUI left pane does not split the same workspace into duplicate parent groups.
+- Inherit shared crawlkit TUI improvements for newest-first startup, count-header sorting, preview-first document detail panes, and gitcrawl-style metadata labels.
+- Feed longer, block-shaped Notion page previews into the TUI detail pane so pages read more like documents instead of flat metadata.
+- Include page comments in Notion TUI previews after block content.
+- Route the TUI through read-only SQLite access and cover the JSON fallback in tests.

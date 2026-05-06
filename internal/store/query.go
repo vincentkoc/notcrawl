@@ -97,7 +97,49 @@ func (s *Store) PageBlocks(ctx context.Context, pageID string) ([]Block, error) 
 		b.Alive = IntBool(alive)
 		blocks = append(blocks, b)
 	}
-	return blocks, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return pageBlocksDisplayOrder(pageID, blocks), nil
+}
+
+func pageBlocksDisplayOrder(pageID string, blocks []Block) []Block {
+	children := map[string][]Block{}
+	for _, block := range blocks {
+		if block.ID == pageID {
+			continue
+		}
+		children[block.ParentID] = append(children[block.ParentID], block)
+	}
+	for parent := range children {
+		sortBlockSiblings(children[parent])
+	}
+
+	ordered := make([]Block, 0, len(blocks))
+	seen := map[string]struct{}{}
+	var appendChildren func(string)
+	appendChildren = func(parentID string) {
+		for _, block := range children[parentID] {
+			if _, ok := seen[block.ID]; ok {
+				continue
+			}
+			seen[block.ID] = struct{}{}
+			ordered = append(ordered, block)
+			appendChildren(block.ID)
+		}
+	}
+	appendChildren(pageID)
+	if len(ordered) == 0 {
+		return blocks
+	}
+	for _, block := range blocks {
+		if _, ok := seen[block.ID]; ok || block.ID == pageID {
+			continue
+		}
+		seen[block.ID] = struct{}{}
+		ordered = append(ordered, block)
+	}
+	return ordered
 }
 
 func (s *Store) PageComments(ctx context.Context, pageID string) ([]Comment, error) {
