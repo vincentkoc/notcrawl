@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace the single validation workflow with CI jobs for dependencies,
+  formatting/vet, tests, CLI control-surface smoke checks, and GoReleaser
+  snapshot builds.
+- Add CodeQL analysis on pull requests, `main`, the crawlkit integration branch,
+  weekly schedule, and manual dispatch.
 - Depend on `github.com/vincentkoc/crawlkit v0.4.0` for shared config,
   status/control, snapshot, mirror, output, and terminal explorer mechanics.
 - Keep Notion API/Desktop parsing, Markdown rendering, page/comment/database
