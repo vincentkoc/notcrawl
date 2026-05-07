@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bump routine GitHub Actions dependencies.
+
 - Add a repo-local `notcrawl` agent skill for local archive, freshness, query,
   and verification workflows.
 - Document `notcrawl sql` read-only query examples in the repo-local agent
