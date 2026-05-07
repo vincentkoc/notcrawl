@@ -45,7 +45,7 @@ jobs:
           fi
 
       - name: Checkout tap repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TAP_REPO }}
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
