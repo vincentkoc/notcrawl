@@ -172,11 +172,11 @@ func rootHelpRequested(args []string, valueFlags ...string) bool {
 		if !strings.HasPrefix(arg, "-") {
 			return false
 		}
-		if strings.HasPrefix(arg, "--") {
-			name := strings.TrimPrefix(arg, "--")
-			if before, _, ok := strings.Cut(name, "="); ok {
-				name = before
-			} else if _, ok := valueFlagSet[name]; ok {
+		if name, ok := strings.CutPrefix(arg, "--"); ok {
+			if strings.Contains(name, "=") {
+				continue
+			}
+			if _, ok := valueFlagSet[name]; ok {
 				i++
 			}
 		}
