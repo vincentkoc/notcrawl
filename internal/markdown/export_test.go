@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/vincentkoc/notcrawl/internal/store"
 )
@@ -102,6 +103,36 @@ func TestExporterRemovesEmojiFromPathNames(t *testing.T) {
 	want := filepath.Join(dir, "研究", "計画-q2-page1.md")
 	if len(s.Files) != 1 || s.Files[0] != want {
 		t.Fatalf("unexpected export path: %+v, want %s", s.Files, want)
+	}
+}
+
+func TestExporterTruncatesMultibytePathNamesOnRuneBoundary(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "notcrawl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := store.NowMS()
+	title := "где-у-меня-записаны-соображения-по-поводу-аллокации-затрат-на-подрядчиков-и-других-расходов"
+	if err := st.UpsertPage(ctx, store.Page{ID: "page1", Title: title, Alive: true, Source: "test", SyncedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	s, err := Exporter{Store: st, Dir: dir}.Export(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Files) != 1 {
+		t.Fatalf("unexpected export paths: %+v", s.Files)
+	}
+	name := filepath.Base(s.Files[0])
+	if !utf8.ValidString(name) {
+		t.Fatalf("export path is not valid UTF-8: %q", name)
+	}
+	if _, err := os.Stat(s.Files[0]); err != nil {
+		t.Fatalf("exported file missing: %v", err)
 	}
 }
 
