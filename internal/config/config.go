@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	crawlconfig "github.com/vincentkoc/crawlkit/config"
+	crawlconfig "github.com/openclaw/crawlkit/config"
 )
 
 const (

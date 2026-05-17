@@ -4,6 +4,8 @@
 
 - Move top-level CLI parsing plus `search` and `sql` argument parsing onto Kong while preserving existing help, config, and output behavior.
 - Support `notcrawl search --help`, `notcrawl sql --help`, and `notcrawl search --limit N` without loading config for help output.
+- Add cached release checks with `notcrawl check-update` and passive terminal
+  notices when a newer OpenClaw release is available.
 
 - Bump routine GitHub Actions dependencies.
 
@@ -16,7 +18,7 @@
   snapshot builds.
 - Add CodeQL analysis on pull requests, `main`, the crawlkit integration branch,
   weekly schedule, and manual dispatch.
-- Depend on `github.com/vincentkoc/crawlkit v0.4.0` for shared config,
+- Depend on `github.com/openclaw/crawlkit v0.4.0` for shared config,
   status/control, snapshot, mirror, output, and terminal explorer mechanics.
 - Keep Notion API/Desktop parsing, Markdown rendering, page/comment/database
   schemas, Notion FTS body construction, and data-source compatibility

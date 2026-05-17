@@ -16,6 +16,7 @@ Also smoke the crawlkit control and non-interactive TUI surfaces before a tag:
 notcrawl metadata --json
 notcrawl status --json
 notcrawl doctor --json
+notcrawl check-update --json
 notcrawl tui --json --limit 10
 ```
 
@@ -63,7 +64,7 @@ The release workflow:
 
 ## Optional Variables
 
-- `HOMEBREW_TAP_REPO`: defaults to `vincentkoc/tap`
+- `HOMEBREW_TAP_REPO`: defaults to `openclaw/tap`
 - `CLOUDSMITH_APT_TARGETS`: comma-separated targets like `ubuntu/jammy,debian/trixie`
 - `CLOUDSMITH_DISTRIBUTION` and `CLOUDSMITH_RELEASE`: legacy single APT target
 - `CLOUDSMITH_RPM_DISTRIBUTION`: defaults to `el`

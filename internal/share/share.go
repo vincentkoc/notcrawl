@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/openclaw/crawlkit/mirror"
 	"github.com/openclaw/notcrawl/internal/store"
-	"github.com/vincentkoc/crawlkit/mirror"
 )
 
 var exportTables = []string{

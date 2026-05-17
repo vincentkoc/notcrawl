@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/openclaw/crawlkit/control"
+	"github.com/openclaw/crawlkit/progress"
+	"github.com/openclaw/crawlkit/tui"
 	"github.com/openclaw/notcrawl/internal/config"
 	"github.com/openclaw/notcrawl/internal/markdown"
 	"github.com/openclaw/notcrawl/internal/notionapi"
@@ -24,9 +27,6 @@ import (
 	"github.com/openclaw/notcrawl/internal/share"
 	"github.com/openclaw/notcrawl/internal/store"
 	"github.com/openclaw/notcrawl/internal/tableexport"
-	"github.com/vincentkoc/crawlkit/control"
-	"github.com/vincentkoc/crawlkit/progress"
-	"github.com/vincentkoc/crawlkit/tui"
 )
 
 var version = "dev"
@@ -64,6 +64,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, version)
 		return nil
 	}
+	if cmd == "check-update" {
+		return runCheckUpdate(ctx, stdout, stderr, cmdArgs)
+	}
 	if cmd == "metadata" {
 		return runMetadata(stdout)
 	}
@@ -90,6 +93,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		printSQLUsage(stdout)
 		return nil
 	}
+	maybeNotifyRelease(ctx, stderr, rest)
 	cfg, err := config.Load(global.Config)
 	if err != nil {
 		return err
@@ -284,19 +288,20 @@ func runMetadata(stdout io.Writer) error {
 	manifest.Capabilities = []string{"metadata", "status", "doctor", "sync", "tap", "tui", "git-share", "sql", "markdown", "table-export"}
 	manifest.Privacy = control.Privacy{ContainsPrivateMessages: false, ExportsSecrets: false, LocalOnlyScopes: []string{"notion", "desktop-cache", "sqlite", "git-share"}}
 	manifest.Commands = map[string]control.Command{
-		"status":    {Title: "Status", Argv: []string{"notcrawl", "status", "--json"}, JSON: true},
-		"doctor":    {Title: "Doctor", Argv: []string{"notcrawl", "doctor", "--json"}, JSON: true},
-		"sync":      {Title: "Sync", Argv: []string{"notcrawl", "sync", "--source", "all"}, Mutates: true},
-		"tap":       {Title: "Import desktop cache", Argv: []string{"notcrawl", "sync", "--source", "desktop"}, Mutates: true},
-		"tui":       {Title: "Terminal browser", Argv: []string{"notcrawl", "tui"}},
-		"tui-json":  {Title: "Terminal browser rows", Argv: []string{"notcrawl", "tui", "--json"}, JSON: true},
-		"publish":   {Title: "Publish share", Argv: []string{"notcrawl", "publish"}, Mutates: true},
-		"subscribe": {Title: "Subscribe share", Argv: []string{"notcrawl", "subscribe"}, Mutates: true},
-		"update":    {Title: "Update share", Argv: []string{"notcrawl", "update"}, Mutates: true},
-		"export-md": {Title: "Export Markdown", Argv: []string{"notcrawl", "export-md"}, Mutates: true},
-		"databases": {Title: "List databases", Argv: []string{"notcrawl", "databases"}},
-		"export-db": {Title: "Export database", Argv: []string{"notcrawl", "export-db"}, Mutates: true},
-		"legacy-db": {Title: "Legacy database override", Argv: []string{"notcrawl", "--db"}, Legacy: true},
+		"status":       {Title: "Status", Argv: []string{"notcrawl", "status", "--json"}, JSON: true},
+		"check-update": {Title: "Check for updates", Argv: []string{"notcrawl", "check-update", "--json"}, JSON: true},
+		"doctor":       {Title: "Doctor", Argv: []string{"notcrawl", "doctor", "--json"}, JSON: true},
+		"sync":         {Title: "Sync", Argv: []string{"notcrawl", "sync", "--source", "all"}, Mutates: true},
+		"tap":          {Title: "Import desktop cache", Argv: []string{"notcrawl", "sync", "--source", "desktop"}, Mutates: true},
+		"tui":          {Title: "Terminal browser", Argv: []string{"notcrawl", "tui"}},
+		"tui-json":     {Title: "Terminal browser rows", Argv: []string{"notcrawl", "tui", "--json"}, JSON: true},
+		"publish":      {Title: "Publish share", Argv: []string{"notcrawl", "publish"}, Mutates: true},
+		"subscribe":    {Title: "Subscribe share", Argv: []string{"notcrawl", "subscribe"}, Mutates: true},
+		"update":       {Title: "Update share", Argv: []string{"notcrawl", "update"}, Mutates: true},
+		"export-md":    {Title: "Export Markdown", Argv: []string{"notcrawl", "export-md"}, Mutates: true},
+		"databases":    {Title: "List databases", Argv: []string{"notcrawl", "databases"}},
+		"export-db":    {Title: "Export database", Argv: []string{"notcrawl", "export-db"}, Mutates: true},
+		"legacy-db":    {Title: "Legacy database override", Argv: []string{"notcrawl", "--db"}, Legacy: true},
 	}
 	return writeJSON(stdout, manifest)
 }
@@ -1357,6 +1362,7 @@ Global flags:
 
 Commands:
   metadata                  Print crawlkit control metadata
+  check-update              Check for a newer notcrawl release
   version                   Print version
   init                      Write a starter config
   doctor                    Check config, database, desktop cache, and token
