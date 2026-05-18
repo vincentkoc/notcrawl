@@ -38,16 +38,18 @@ jobs:
 
       - name: Dispatch tap formula update
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          export GH_TOKEN="${HOMEBREW_TAP_TOKEN:-${HOMEBREW_TAP_GITHUB_TOKEN:-}}"
           if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Set HOMEBREW_TAP_GITHUB_TOKEN with workflow access to ${TAP_REPO}"
+            echo "::error::Set HOMEBREW_TAP_TOKEN with workflow access to ${TAP_REPO}"
             exit 1
           fi
 
           if [ "$(gh api "repos/${TAP_REPO}" --jq '.permissions.push // false')" != "true" ]; then
-            echo "::error::HOMEBREW_TAP_GITHUB_TOKEN must have push access to ${TAP_REPO}."
+            echo "::error::HOMEBREW_TAP_TOKEN must have push access to ${TAP_REPO}."
             exit 1
           fi
 
